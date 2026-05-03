@@ -1,0 +1,26 @@
+{
+  "skill_name": "iterative-review-fix",
+  "evals": [
+    {
+      "id": 0,
+      "prompt": "请检视我刚改的实现，修复发现的问题，然后再检视；最多 3 轮，没意见就停。",
+      "expected_output": "Skill should support a bounded inspect-fix loop with user-specified round limits and clear stop conditions.",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 1,
+      "prompt": "这个仓库里有 review findings，请按意见修复，但不要碰无关改动，修完跑必要检查。",
+      "expected_output": "Skill should require inspecting before editing, scoped fixes, preserving unrelated changes, and verification.",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 2,
+      "prompt": "只帮我 review 这个 PR，不要修改代码；另外告诉我如果要修复应该怎么做。",
+      "expected_output": "Skill should not over-trigger a fix loop for review-only requests and should define final reporting clearly.",
+      "files": [],
+      "expectations": []
+    }
+  ]
+}
