@@ -3,3 +3,9 @@
 ```shell
 npx skills add https://github.com/ekil1100/skills --skill iterative-review-fix
 ```
+
+**commit-push** - create semantic commit messages, commit selected changes, and push the current branch.
+
+```shell
+npx skills add https://github.com/ekil1100/skills --skill commit-push
+```

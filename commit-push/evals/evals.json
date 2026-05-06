@@ -1,0 +1,40 @@
+{
+  "skill_name": "commit-push",
+  "evals": [
+    {
+      "id": 0,
+      "prompt": "commit msg 语义化",
+      "expected_output": "Inspect current git changes and recommend a Conventional Commits message only, without staging, committing, or pushing.",
+      "files": [],
+      "expectations": [
+        "The response uses a Conventional Commits message.",
+        "The response bases the message on the actual changed files and diff summary.",
+        "The response does not run or propose completed git add, git commit, or git push actions."
+      ]
+    },
+    {
+      "id": 1,
+      "prompt": "帮我提交当前关于 commit-push skill 的改动，不要 push",
+      "expected_output": "Inspect git status and diff, stage only commit-push related files, commit with a semantic message, and explicitly avoid pushing.",
+      "files": [],
+      "expectations": [
+        "The workflow checks status and cached/uncached diff before committing.",
+        "The workflow stages only README.md and commit-push skill files for this change.",
+        "The commit message follows Conventional Commits and uses commit-push as scope.",
+        "The workflow does not push because the user said not to push."
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "commit push 当前分支；如果远端分支不存在就处理一下",
+      "expected_output": "Commit relevant changes with a semantic message, inspect upstream/remote information, and use a safe first push command when no upstream exists.",
+      "files": [],
+      "expectations": [
+        "The workflow checks the current branch and upstream before pushing.",
+        "The workflow uses git push -u origin <branch> only when there is no upstream and origin exists.",
+        "The workflow does not force push or automatically rebase after a rejection.",
+        "The final report includes commit hash, message, push target, and remaining worktree status."
+      ]
+    }
+  ]
+}
