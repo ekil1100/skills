@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Plan</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/prismjs/themes/prism.min.css">
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f5f7fb;
+      --surface: #ffffff;
+      --surface-2: #f9fafb;
+      --text: #172033;
+      --muted: #667085;
+      --line: #d8dee8;
+      --accent: #2563eb;
+      --accent-soft: #e8f0ff;
+      --done: #087f5b;
+      --doing: #b45309;
+      --todo: #315b9d;
+      --blocked: #b42318;
+      --shadow: 0 18px 45px rgba(20, 31, 54, .08);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font: 15px/1.65 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--text);
+      background: radial-gradient(circle at top left, #eaf1ff 0, transparent 360px), var(--bg);
+    }
+    a { color: var(--accent); }
+    code {
+      padding: .14rem .36rem;
+      border-radius: 6px;
+      background: #eef2f7;
+      font-size: .92em;
+      overflow-wrap: anywhere;
+    }
+    pre {
+      margin: 0;
+      padding: 16px;
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #f8fafc;
+    }
+    .page { width: min(1120px, calc(100% - 40px)); margin: 32px auto 56px; }
+    .hero {
+      padding: 30px;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: linear-gradient(135deg, #ffffff 0%, #f8fbff 100%);
+      box-shadow: var(--shadow);
+    }
+    .eyebrow { margin: 0 0 8px; color: var(--accent); font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+    h1 { margin: 0; font-size: clamp(30px, 5vw, 48px); line-height: 1.08; letter-spacing: 0; }
+    h2 { margin: 0 0 14px; font-size: 20px; letter-spacing: 0; }
+    h3 { margin: 0 0 8px; font-size: 16px; letter-spacing: 0; }
+    p { margin: 0; }
+    ul { margin: 0; padding-left: 1.1rem; }
+    li + li { margin-top: 6px; }
+    .lead { max-width: 760px; margin-top: 14px; color: var(--muted); font-size: 17px; }
+    .meta { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-height: 28px;
+      padding: 5px 10px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #fff;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 650;
+      white-space: nowrap;
+    }
+    .section {
+      margin-top: 18px;
+      padding: 22px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: rgba(255,255,255,.92);
+      box-shadow: 0 8px 24px rgba(20, 31, 54, .04);
+    }
+    .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+    .box { min-width: 0; padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-2); }
+    .box p { color: var(--muted); }
+    .status {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 72px;
+      height: 26px;
+      padding: 0 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 800;
+      text-transform: uppercase;
+    }
+    .status.done { color: var(--done); background: #e7f8f1; }
+    .status.doing { color: var(--doing); background: #fff4e6; }
+    .status.todo { color: var(--todo); background: #eaf1ff; }
+    .status.blocked { color: var(--blocked); background: #fff0f0; }
+    .step-list { display: grid; gap: 12px; }
+    .step {
+      display: grid;
+      grid-template-columns: 92px minmax(0, 1.25fr) minmax(220px, .8fr) minmax(220px, .8fr);
+      gap: 16px;
+      align-items: start;
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #fff;
+    }
+    .step-main, .step-output, .step-check { min-width: 0; }
+    .step-label { margin-bottom: 4px; color: var(--muted); font-size: 12px; font-weight: 700; text-transform: uppercase; }
+    .step-title { font-weight: 800; }
+    .step-text { color: var(--muted); overflow-wrap: anywhere; }
+    .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .callout { border-left: 4px solid var(--accent); }
+    .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; }
+    table { width: 100%; min-width: 720px; border-collapse: collapse; background: #fff; }
+    th, td { padding: 12px 14px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+    th { background: #f3f6fb; font-size: 12px; color: var(--muted); text-transform: uppercase; }
+    .mermaid { display: flex; justify-content: center; padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
+    @media (max-width: 980px) {
+      .grid, .two-col { grid-template-columns: 1fr; }
+      .step { grid-template-columns: 1fr; }
+      .status { justify-content: flex-start; width: fit-content; }
+    }
+    @media print {
+      body { background: #fff; }
+      .page { width: auto; margin: 0; }
+      .hero, .section { box-shadow: none; break-inside: avoid; }
+    }
+  </style>
+  <script defer src="https://cdn.jsdelivr.net/npm/prismjs/prism.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/prismjs/components/prism-typescript.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script>
+    window.addEventListener("DOMContentLoaded", () => {
+      if (window.mermaid) mermaid.initialize({ startOnLoad: true, theme: "base" });
+    });
+  </script>
+</head>
+<body>
+  <main class="page">
+    <header class="hero">
+      <p class="eyebrow">Execution Plan</p>
+      <h1>计划标题</h1>
+      <p class="lead">用两三句话说明目标、约束和完成定义。</p>
+      <div class="meta">
+        <span class="pill">Owner: Codex</span>
+        <span class="pill">Updated: YYYY-MM-DD</span>
+        <span class="pill">Scope: repo / feature / docs</span>
+      </div>
+    </header>
+
+    <section class="section">
+      <h2>Overview</h2>
+      <div class="grid">
+        <div class="box"><h3>Goal</h3><p>目标和交付物。</p></div>
+        <div class="box"><h3>Context</h3><p>当前状态、输入和边界。</p></div>
+        <div class="box"><h3>Validation</h3><p>测试、检查或验收方式。</p></div>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>Steps</h2>
+      <div class="step-list">
+        <article class="step">
+          <div><span class="status doing">doing</span></div>
+          <div class="step-main">
+            <div class="step-label">Step</div>
+            <div class="step-title">步骤标题</div>
+            <p class="step-text">目的、动作和依赖。长文本会自动换行。</p>
+          </div>
+          <div class="step-output">
+            <div class="step-label">Output</div>
+            <p class="step-text">预期产出。</p>
+          </div>
+          <div class="step-check">
+            <div class="step-label">Validation</div>
+            <p class="step-text">验证方式。</p>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section class="section two-col">
+      <div class="box callout"><h2>Decision Points</h2><ul><li>选项、默认建议和取舍。</li></ul></div>
+      <div class="box"><h2>Risks</h2><ul><li>风险、影响和缓解方式。</li></ul></div>
+    </section>
+
+    <section class="section">
+      <h2>Next Actions</h2>
+      <ul><li>当前最应该执行的动作。</li></ul>
+    </section>
+  </main>
+</body>
+</html>

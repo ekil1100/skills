@@ -35,15 +35,17 @@ description: 当用户要求 plan、计划、方案、路线图、分阶段执�
 ## HTML 展示
 
 1. 在 workspace 内创建或更新一个小型 HTML 文件，命名优先用 `plan.html`、`<task>-plan.html` 或放入相关目录。
-2. HTML 优先自包含：内联 CSS，少量可选内联 JS；允许为 Mermaid 和 Prism.js 使用 CDN，其他远程依赖需有明确收益。
-3. 页面结构围绕计划内容展开，按需加入图、代码块、矩阵、时间线、检查清单和状态汇总。
-4. HTML 既是计划内容也是展示载体；不要让版式设计稀释计划本身。
-5. 最终回复给出 HTML 文件的绝对路径链接，并概述计划状态或执行结果。
+2. 基于 `assets/plan-template.html` 生成页面，保留其整体布局、CSS 变量、状态样式和响应式结构。
+3. HTML 优先自包含：内联 CSS，少量可选内联 JS；允许为 Mermaid 和 Prism.js 使用 CDN，其他远程依赖需有明确收益。
+4. 页面结构围绕计划内容展开，按需加入图、代码块、矩阵、时间线、检查清单和状态汇总。
+5. HTML 既是计划内容也是展示载体；不要让版式设计稀释计划本身。
+6. 最终回复给出 HTML 文件的绝对路径链接，并概述计划状态或执行结果。
 
 ## 视觉与内容要求
 
 - 保持信息密度高、层级清楚、可打印；移动端和桌面端都能阅读。
 - 使用可访问的对比度、语义化标题、简洁表格、清晰列表和稳定布局。
+- 步骤区域默认使用模板中的 `.step-list` 和 `.step`，不要用宽表格承载长文本；确需表格时外层必须可横向滚动。
 - 简单图示优先用内联 SVG；流程、依赖、时序或分支复杂时可用 Mermaid，并可通过 CDN 引入渲染脚本。
 - 代码示例使用 `<pre><code class="language-xxx">`；需要真实语法高亮时用 Prism.js CDN，并按需引入语言组件。
 - 可加入时间线、依赖矩阵、风险热度、检查清单、文件影响区和验收标准。
@@ -51,7 +53,7 @@ description: 当用户要求 plan、计划、方案、路线图、分阶段执�
 
 ## 允许的 CDN
 
-- Prism.js：用于代码高亮，可使用 `https://cdn.jsdelivr.net/npm/prismjs/themes/prism-tomorrow.min.css`、`https://cdn.jsdelivr.net/npm/prismjs/prism.min.js`，再按需添加 `components/prism-<language>.min.js`。
+- Prism.js：用于代码高亮，模板默认使用 `https://cdn.jsdelivr.net/npm/prismjs/themes/prism.min.css`、`https://cdn.jsdelivr.net/npm/prismjs/prism.min.js`，再按需添加 `components/prism-<language>.min.js`。
 - Mermaid：用于流程图、时序图、依赖图和状态图，可使用 `https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js` 并调用 `mermaid.initialize({ startOnLoad: true })`。
 - CDN 只用于增强展示；核心计划内容必须在脚本加载失败时仍可阅读。
 - 不要引入字体、图标库、UI 框架、分析脚本或与计划无关的远程资源。
