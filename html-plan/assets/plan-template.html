@@ -116,6 +116,73 @@
     .card { min-width: 0; padding: 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-alt); }
     .card > :first-child { margin-top: 0; }
     .card > :last-child { margin-bottom: 0; }
+    .insight-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+      gap: 12px;
+      margin: 14px 0;
+    }
+    .insight-card {
+      min-width: 0;
+      padding: 15px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: linear-gradient(180deg, #ffffff 0%, var(--surface-alt) 100%);
+    }
+    .insight-card strong {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 13px;
+      color: var(--accent);
+      text-transform: uppercase;
+    }
+    .callout {
+      margin: 14px 0;
+      padding: 14px 16px;
+      border: 1px solid var(--line);
+      border-left: 4px solid var(--accent);
+      border-radius: 10px;
+      background: var(--accent-soft);
+    }
+    .callout.important { border-left-color: var(--blocked); background: #fff7f7; }
+    .callout.warning { border-left-color: var(--doing); background: #fff8ed; }
+    .timeline {
+      display: grid;
+      gap: 10px;
+      margin: 14px 0;
+      counter-reset: phase;
+    }
+    .timeline-item {
+      position: relative;
+      padding: 14px 14px 14px 48px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--surface-alt);
+    }
+    .timeline-item::before {
+      counter-increment: phase;
+      content: counter(phase);
+      position: absolute;
+      left: 14px;
+      top: 14px;
+      display: grid;
+      place-items: center;
+      width: 24px;
+      height: 24px;
+      border-radius: 999px;
+      background: var(--accent);
+      color: #fff;
+      font-size: 12px;
+      font-weight: 800;
+    }
+    .diagram-box {
+      margin: 14px 0;
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #fff;
+      overflow-x: auto;
+    }
     .status {
       display: inline-flex;
       align-items: center;
