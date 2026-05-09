@@ -10,7 +10,7 @@ npx skills add https://github.com/ekil1100/skills --skill iterative-review-fix -
 npx skills add https://github.com/ekil1100/skills --skill commit-push -y -g
 ```
 
-**html-plan** - present complex plans as a self-contained HTML page with diagrams, code blocks, statuses, risks, and next actions.
+**html-plan** - render an existing plan file into a self-contained HTML view, preserving the source file's structure instead of forcing fixed sections.
 
 ```shell
 npx skills add https://github.com/ekil1100/skills --skill html-plan -y -g

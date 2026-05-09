@@ -1,60 +1,70 @@
 ---
 name: html-plan
-description: 当用户要求 plan、计划、方案、路线图、分阶段执行、复杂任务拆解，或计划需要图示、代码高亮、状态追踪、可视化说明时使用。直接生成包含完整计划内容的 HTML 文件，并在执行过程中按需更新。
+description: MUST use when a request combines HTML output intent with an existing plan-like file. Trigger for “HTML 文件”, “HTML 预览页”, “配套 HTML”, “用 HTML 展示”, “展示成 HTML”, “render as HTML”, “不要改计划内容”, plus files like plan.md, implementation-plan.md, release-plan.md, roadmap.yaml, tasks.json, or .txt plans. Roadmap and tasks files count as plan 文件 even if the user does not say plan. Do not use for merely drafting a plan with no plan file and no HTML output. 这个 skill 不负责制定计划本身，不预设 sections；HTML 必须基于输入 plan 文件的实际内容和顺序生成。
 ---
 
 # HTML Plan
 
-直接生成尽量离线可打开的 HTML plan，让用户快速理解目标、步骤、取舍、风险和当前进度。
+把一个已有的 plan 文件转换成易读、可审阅、方便分享的 HTML 展示页。plan 文件是唯一内容来源；HTML 是展示载体，不是重新发明计划结构的地方。
 
 ## 触发边界
 
-- 用户明确要求用 HTML 展示 plan、生成可视化计划、计划页、执行路线图。
-- 任务步骤多、依赖关系复杂、存在分支决策、需要对比方案或用户需要审阅计划。
-- 计划包含代码、数据结构、API、文件改动范围、流程图、架构图、时序图时优先使用。
-- 简单一两步任务不要创建 HTML；直接说明并执行。
+- 已经有明确的 plan 文件，例如 `plan.md`、`implementation-plan.md`、`roadmap.yaml`、`tasks.json`。
+- 用户要求把某个计划、方案、路线图、任务清单或执行计划“展示成 HTML”“生成预览页”“方便审阅/分享”。
+- 你在当前工作流中已经创建了 plan 文件，并且需要给用户一个可打开的 HTML 视图。
+- 如果没有 plan 文件，先不要直接使用此 skill 生成 HTML。先创建或定位 plan 文件，再基于该文件生成展示页。
+- 如果用户只是在要求你制定计划，而没有要求 HTML 展示，也没有 plan 文件输出需求，正常回答或创建 plan 文件即可，不要强行调用此 skill。
 
-## 创建流程
+## 核心原则
 
-1. 先阅读必要上下文，明确目标、背景、约束、输入、未知点、成功标准和不可做事项。
-2. 先形成计划的信息架构，再直接写入 HTML；不需要创建中间文本 plan 文件。
-3. 将任务拆成 3-7 个步骤；每步包含目的、主要动作、产出、依赖和验证方式。
-4. 标出决策点、风险、阻塞项和需要用户确认的问题；没有高风险缺口时继续推进。
-5. 为每步分配状态：`todo`、`doing`、`done`、`blocked`；执行中有实质变化时同步更新 plan。
+- Source first：先完整阅读输入 plan 文件，再生成 HTML。
+- Preserve structure：保留 plan 文件的标题层级、段落顺序、列表、表格、代码块、图示和状态标记。
+- No fixed sections：不要强制输出 Goal、Context、Steps、Risks、Validation 等固定区块，除非它们已经出现在输入文件中。
+- Minimal interpretation：可以把原文结构转成更易读的视觉组件，但不要补写原文件没有的计划内容。
+- One-way rendering：plan 文件是事实来源。更新计划时先更新 plan 文件，再重新生成或同步 HTML。
 
-## HTML 内容
+## 输入处理
 
-- Goal：目标、完成定义、最终交付物。
-- Context：已知输入、当前状态、相关文件或系统边界。
-- Steps：可执行步骤，按依赖顺序排列，不跳过验证。
-- Decision Points：需要选择的方案、取舍和默认建议。
-- Risks：正确性、安全、数据、性能、时间和范围风险；每条必须写明影响和消减方案。
-- Validation：测试、检查、人工验收或回滚方式。
-- Next Actions：当前最应该执行的 1-3 个动作。
+1. 从用户消息、当前工作流或 workspace 中确定 plan 文件路径。路径不明确时，优先查找显眼的 `plan.md`、`*-plan.md`、`roadmap.*`、`tasks.*`。
+2. 读取整个 plan 文件。Markdown 是首选格式；JSON、YAML、TXT、CSV 也可以展示。
+3. 识别源文件中的真实结构：
+   - Markdown 标题转为同名 HTML sections。
+   - 普通段落、引用、列表按原顺序展示。
+   - 任务列表 `- [ ]` / `- [x]` 转成 checklist。
+   - 表格放入可横向滚动容器。
+   - 代码块使用 `<pre><code class="language-xxx">`。
+   - `mermaid` 代码块转成 Mermaid 图。
+   - 状态词如 `todo`、`doing`、`done`、`blocked`、`pending`、`in progress` 可视觉化为 badge，但不要改写原含义。
+   - JSON/YAML 的对象键和数组项按原层级展示，键名就是展示标题，不映射到固定 section 名。
+4. 如果源文件包含 frontmatter 或元数据，可以展示为页面 meta；不要把元数据当成固定内容区。
 
-## HTML 展示
+## 生成流程
 
-1. 在 workspace 内创建或更新一个小型 HTML 文件，命名优先用 `plan.html`、`<task>-plan.html` 或放入相关目录。
-2. 基于 `assets/plan-template.html` 生成页面，保留其整体布局、CSS 变量、状态样式和响应式结构。
-3. HTML 优先自包含：内联 CSS，少量可选内联 JS；允许为 Mermaid 和 Prism.js 使用 CDN，其他远程依赖需有明确收益。
-4. 页面结构围绕计划内容展开，按需加入图、代码块、矩阵、时间线、检查清单和状态汇总。
-5. HTML 既是计划内容也是展示载体；不要让版式设计稀释计划本身。
-6. 最终回复给出 HTML 文件的绝对路径链接，并概述计划状态或执行结果。
+1. 选择输出路径：默认与 plan 文件同目录，文件名为 `<plan-basename>.html`。用户指定路径时遵从用户指定。
+2. 使用 `assets/plan-template.html` 作为视觉外壳和 CSS 起点；替换其中的占位内容，实际 sections 必须来自输入 plan 文件。
+3. 设置页面标题：
+   - 优先使用 plan 文件的第一个一级标题。
+   - 没有一级标题时使用文件名。
+4. 设置页面 meta，只放生成信息，例如 source path、updated time、format。不要在 meta 中补造计划内容。
+5. 将 plan 文件逐段渲染为 HTML。保持原顺序，优先提升可读性，而不是重新组织信息架构。
+6. 生成后快速检查 HTML 是否能离线打开，内容是否完整，特殊字符是否正确转义。
+7. 最终回复给出 HTML 文件的绝对路径链接，并注明它来自哪个 plan 文件。
 
 ## 视觉与内容要求
 
 - 保持信息密度高、层级清楚、可打印；移动端和桌面端都能阅读。
 - 使用可访问的对比度、语义化标题、简洁表格、清晰列表和稳定布局。
-- 步骤区域默认使用模板中的 `.step-list` 和 `.step`，不要用宽表格承载长文本；确需表格时外层必须可横向滚动。
-- 简单图示优先用内联 SVG；流程、依赖、时序或分支复杂时可用 Mermaid，并可通过 CDN 引入渲染脚本。
-- 代码示例使用 `<pre><code class="language-xxx">`；需要真实语法高亮时用 Prism.js CDN，并按需引入语言组件。
-- 可加入时间线、依赖矩阵、风险热度、检查清单、文件影响区和验收标准。
-- 不要做营销页、装饰性大 hero、外部字体、动画堆砌或与计划无关的视觉元素。
+- 不要新增和输入 plan 无关的 hero 文案、营销文案、解释性教程、外部字体、动画堆砌或装饰元素。
+- 不要把所有内容塞进宽表格。长文本优先使用段落、列表、卡片或原始标题层级。
+- 只有当输入 plan 中确实有图、矩阵、时间线、状态、代码或表格时，才生成对应的展示组件。
+- 允许轻微增强阅读体验，例如状态 badge、任务 checkbox、代码高亮、表格滚动、目录导航；增强必须服务于原文内容。
+- 不在 HTML 中写入密钥、个人隐私、内部令牌或不该展示的大段日志。
 
 ## 允许的 CDN
 
-- Prism.js：用于代码高亮，模板默认使用 `https://cdn.jsdelivr.net/npm/prismjs/themes/prism.min.css`、`https://cdn.jsdelivr.net/npm/prismjs/prism.min.js`，再按需添加 `components/prism-<language>.min.js`。
-- Mermaid：用于流程图、时序图、依赖图和状态图，可使用 `https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js` 并调用 `mermaid.initialize({ startOnLoad: true })`。
+- 默认生成自包含 HTML，核心内容不依赖网络。
+- Prism.js：只有当计划包含代码块且真实语法高亮有收益时使用。可用 `https://cdn.jsdelivr.net/npm/prismjs/themes/prism.min.css`、`https://cdn.jsdelivr.net/npm/prismjs/prism.min.js`，再按需添加语言组件。
+- Mermaid：只有当计划包含 Mermaid 图时使用 `https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js` 并调用 `mermaid.initialize({ startOnLoad: true })`。
 - CDN 只用于增强展示；核心计划内容必须在脚本加载失败时仍可阅读。
 - 不要引入字体、图标库、UI 框架、分析脚本或与计划无关的远程资源。
 
@@ -62,10 +72,12 @@ description: 当用户要求 plan、计划、方案、路线图、分阶段执�
 
 - Prism 代码块：`<pre><code class="language-typescript">...</code></pre>`。
 - Mermaid 图：`<pre class="mermaid">graph TD; A[输入] --> B[执行] --> C[验证]</pre>`。
+- 状态 badge：`<span class="status done">done</span>`。
+- 任务项：`<li class="task done"><input type="checkbox" checked disabled> 完成的任务</li>`。
 
 ## 更新规则
 
-- HTML 是计划的可视化载体，不替代必要的代码修改、测试或最终汇报。
-- 如果发现新约束，先更新决策点、风险和步骤状态，再继续执行。
-- 不在 HTML 中写入密钥、个人隐私、内部令牌或不该提交的大段日志。
-- 若用户只要计划不要执行，保持所有执行步骤为 `todo`，并明确等待确认。
+- 如果 plan 文件变化，重新渲染 HTML，避免只在 HTML 中手工修改导致源文件和展示页分叉。
+- 如果用户要求补充或调整计划内容，先更新 plan 文件，再生成 HTML。
+- 如果输入 plan 文件很短，也照实展示；不要为了“看起来完整”扩写固定 sections。
+- 如果 plan 文件格式损坏或无法解析，保留可读的原始文本区块，并在最终回复中说明限制。
