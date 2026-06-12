@@ -1,3 +1,11 @@
+## Install all skills
+
+```shell
+npx skills add ekil1100/skills -g
+```
+
+---
+
 **iterative-review-fix** - review changes and fix it until no issue report.
 
 ```shell
