@@ -23,7 +23,7 @@ description: 当用户给出 issue 链接,要求把当前分支 squash 成一个
    - 标题:`type(scope): summary`(英文)。type 按变更主体选:性能优化用 `perf`、缺陷修复用 `fix`、结构调整用 `refactor`、新功能用 `feat`;scope 用主要改动模块名,与仓库已有提交的 scope 写法保持一致(先看 `git log --oneline -20 master` 的惯例)。
    - **标题全长不超过 49 个字符**(含 `type(scope): ` 前缀)。写完用 `git log -1 --format='%s' | awk '{print length}'` 自查;超长时把专有类名换成更短的通用说法(如 "replace HashTrieMap with ChainedHashMap" → "switch to chained hash map"),具体名称留给正文第一句交代。
    - 正文:英文,先一段概述整体变更(替换/新增了什么、核心机制),再以列表补充次要变更(改名、伴生修复、测试更新等)。已知测试结果时附 `Tested:` 行。
-   - 结尾尾部(顺序固定,Issue 链接来自输入参数,署名取自 `git config user.name` / `user.email`,取不到或形如 noreply 时询问用户):
+   - 结尾尾部(顺序固定,三行如下;仅 `Signed-off-by` 的署名取自 `git config user.name` / `user.email`,取不到或形如 noreply 时询问用户):
 
      ```
      Issue: <issue链接>
@@ -31,6 +31,7 @@ description: 当用户给出 issue 链接,要求把当前分支 squash 成一个
      Signed-off-by: <user.name> <user.email>
      ```
 
+     其中 `<issue链接>`、`<user.name>`、`<user.email>` 是**占位符**,须替换为真实值;`Co-Authored-By: Agent` 是**字面值**,照原样写入,不要替换成具体人名、也不要补邮箱(它没有尖括号,故意区别于占位符)。
    - 仓库钩子若自动追加 Change-Id,保留即可。
 5. **验证**:`git diff backup/<分支名>-presquash HEAD` 必须为空(squash 只改历史不改内容);不为空立即停下报告,不要继续。
 6. 不要 push。最后告知用户备份分支名及确认无误后的删除命令。
