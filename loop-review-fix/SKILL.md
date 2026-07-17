@@ -1,5 +1,5 @@
 ---
-name: iterative-review-fix
+name: loop-review-fix
 description: 用户要求检视后修复、修复 review findings、迭代修改或 review-fix loop 时使用。先 review，再只修有依据的问题，直到无问题或达轮数；默认最多 5 轮。只 review/不要改时不修复。
 ---
 
