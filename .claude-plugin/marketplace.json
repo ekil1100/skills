@@ -1,0 +1,18 @@
+{
+  "plugins": [
+    {
+      "name": "work",
+      "skills": ["./squash-pr"]
+    },
+    {
+      "name": "like",
+      "skills": [
+        "./commit-push",
+        "./html-plan",
+        "./loop-review-fix",
+        "./update-claude",
+        "./xteink-font-bin"
+      ]
+    }
+  ]
+}
