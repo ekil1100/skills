@@ -7,7 +7,7 @@
       "expected_output": "Skill should support a bounded inspect-fix loop with user-specified round limits and clear stop conditions.",
       "files": [],
       "expectations": [
-        "明确用户指定轮数优先，未指定时最多 5 轮",
+        "明确用户指定轮数优先，未指定时最多 50 轮",
         "每轮先 review，再只修复有依据的问题",
         "review 优先由可用 subagent 完成并返回结果",
         "没有可用 subagent 时回退到当前 agent review",

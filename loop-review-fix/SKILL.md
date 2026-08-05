@@ -1,6 +1,6 @@
 ---
 name: loop-review-fix
-description: 用户要求检视后修复、修复 review findings、迭代修改或 review-fix loop 时使用。先 review，再只修有依据的问题，直到无问题或达轮数；默认最多 5 轮。只 review/不要改时不修复。
+description: 用户要求检视后修复、修复 review findings、迭代修改或 review-fix loop 时使用。先 review，再只修有依据的问题，直到无问题或达轮数；默认最多 50 轮。只 review/不要改时不修复。
 ---
 
 # 迭代检视修复
@@ -11,7 +11,7 @@ description: 用户要求检视后修复、修复 review findings、迭代修改
 
 - 只 review、只检视、明确不要改：只给检视意见。
 - 要求修复、处理 findings、检视后继续改：执行循环。
-- 用户未指定轮数时最多 5 轮。
+- 用户未指定轮数时最多 50 轮。
 
 ## 每轮流程
 
