@@ -2,7 +2,11 @@
   "plugins": [
     {
       "name": "work",
-      "skills": ["./squash-pr"]
+      "skills": [
+        "./squash-pr",
+        "./oh-pr",
+        "./d8-binary"
+      ]
     },
     {
       "name": "like",
