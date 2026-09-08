@@ -17,10 +17,22 @@ issue 必须在 squash 提交**之前**创建，因为提交 trailer 里的 `Iss
 
 1. `git status --short`：工作区有改动（或已在 feature 分支上有提交）。当前在 `master`/`main` 上时，本 skill 会新建分支。
 2. 确定 **upstream remote** 与 **fork remote**：
-   - `git remote -v` 看两条 push URL。URL 里命名空间是 `openharmony` 的那条是 upstream（PR 目标）；命名空间是个人账号（如 `ekil`）的那条是 fork（推送 + PR head 来源）。
+   - 用 `git remote -v` 核对 URL，以用户指定的目标 remote、分支为准；目标可以是 `arksteed` 等开发仓库，不能仅因存在 `openharmony` remote 就改投其主干。分别记录 PR 目标与个人 fork（推送 + PR head 来源）。
    - 若只有一个 remote 且就是 upstream，需要先在 GitCode 网页 fork 一次；本 skill 不自动 fork。
-3. `oh-gc auth status`：未登录则用 `scripts/gitcode_login.sh`（复用 `~/.git-credentials` 里的 GitCode PAT，通过 stdin 喂给 `oh-gc auth login`——它的 `--token` flag 不可靠，仍会提示输入）。
-4. 确认仓库存在 PR 模板：`ls .gitee/PULL_REQUEST_TEMPLATE*.md`（OpenHarmony 仓库普遍有）。有就用它填 PR body；没有再退化成自写的两段（修改原因/修改描述）。
+3. **CLI 默认 remote 预检**：在仓库根目录执行：
+   ```bash
+   cli_remote="$(oh-gc repo get-remote)"
+   git remote get-url "$cli_remote"
+   ```
+   - 若该 remote 不存在（常见为没有 `origin`），或指向与本次目标/来源无关的仓库，优先使用官方配置入口：
+     ```bash
+     oh-gc repo set-remote "<upstream-remote>"
+     ```
+     例如目标 remote 为 `arksteed` 时使用 `oh-gc repo set-remote arksteed`。设置后重复上述检查，确认名称和 URL 正确，再继续创建流程。
+   - 配置写入仓库根目录的 `.gitcode/oh-gc-config.json`，不修改 Git remote 或分支 upstream。先检查并保留已有配置改动；此文件作为本地工具配置处理，不默认纳入 PR。
+   - 已在 `oh-gc 0.8.3` 确认：即使提供 `--repo` 和完整 `--head`，创建命令仍会解析本地默认 remote；`--repo` 不能代替此预检。优先配置 CLI，而不是添加/改名 `origin`、改分支跟踪关系或新建临时仓库绕过。
+4. `oh-gc auth status`：未登录则用 `scripts/gitcode_login.sh`（复用 `~/.git-credentials` 里的 GitCode PAT，通过 stdin 喂给 `oh-gc auth login`——它的 `--token` flag 不可靠，仍会提示输入）。
+5. 确认仓库存在 PR 模板：`ls .gitee/PULL_REQUEST_TEMPLATE*.md`（OpenHarmony 仓库普遍有）。有就用它填 PR body；没有再退化成自写的两段（修改原因/修改描述）。
 
 ## 流程
 
@@ -110,7 +122,7 @@ oh-gc pr create \
   --close-related-issue
 ```
 
-**关键坑**：fork PR 的 `--head` 必须是 `<fork-owner>:<分支名>` 形式（如 `ekil:docs/agents-checklist`）。只写裸分支名会报 `403 Forbidden`，因为 API 会在 upstream 仓里找该分支而找不到。
+**关键坑**：fork PR 显式使用 `--head "<fork-owner>:<分支名>"`（如 `ekil:docs/agents-checklist`），即使已经配置 CLI 默认 remote 也保留此前缀。裸分支名可能触发依赖 `origin` 的 fork 推断，或被 API 当作 upstream 仓内分支而报 `403 Forbidden`。
 
 `--base` 默认 `main`，OpenHarmony 多数仓库主干是 `master`，需显式传 `--base master`。`--close-related-issue` 让 PR 合并时自动关闭关联 issue。
 
@@ -126,6 +138,9 @@ oh-gc pr view --repo <upstream-owner>/<repo> <PR编号>
 
 - **Issue 没套模板**：`oh-gc issue create --body` 不会自动套 GitCode 平台 issue 模板，必须手动把模板章节写进 body。先 `oh-gc issue view` 一个最近 issue 抄模板结构，再填章节。建好后发现没套模板的，用 `oh-gc issue update --body` 覆盖。
 - **PR 没用模板**：这是最常见的返工。建 PR 前必须先 `cat` 模板文件、按章节填，而不是自写两段了事。已建好但没用模板的，读模板重填后 `oh-gc pr update` 覆盖。
+- **`Remote "origin" not found`**：先执行前置检查第 3 项，使用 `repo set-remote` 修正 CLI 默认 remote，再判断是否需要重试。
+- **怀疑需要升级 CLI**：先用 `oh-gc --version` 和 `npm view @oh-gc/cli version` 查询实际版本；有新版不等于已修复，确认相关修复并获得升级授权后再更新。
+- **创建失败或响应缺少链接/分支字段**：重试前用 `oh-gc pr list --repo <目标仓库> --author <当前用户>` 按来源/目标分支查重，再用 `pr view` 确认。已存在的 PR 只校验或更新，不重复创建。
 - **`--head` 裸分支名 → 403**：fork PR 改成 `fork-owner:branch`。
 - **oh-gc `--token` 不生效**：stdin 喂 token（见 `scripts/gitcode_login.sh`）。
 - **标题超长**：把专有类名换成通用说法，具体名留正文第一句。
