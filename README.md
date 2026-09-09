@@ -41,3 +41,15 @@ npx skills add https://github.com/ekil1100/skills --skill oh-pr -y -g
 ```shell
 npx skills add https://github.com/ekil1100/skills --skill d8-binary -y -g
 ```
+
+**arksteed** - 开发、优化、调试和检视 ArkSteed JIT 编译器，覆盖聚焦验证与合入前验收。在远端构建或测试时配合 `arkts-runtime-build` 使用。
+
+```shell
+npx skills add https://github.com/ekil1100/skills --skill arksteed -y -g
+```
+
+**arkts-runtime-build** - 在 SSH 主机 `work` 对齐 ArkTS ets_runtime 的提交和本地改动，执行远端构建或测试，支持 ARM64/QEMU 环境检查。
+
+```shell
+npx skills add https://github.com/ekil1100/skills --skill arkts-runtime-build -y -g
+```

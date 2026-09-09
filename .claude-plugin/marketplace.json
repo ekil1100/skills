@@ -5,7 +5,9 @@
       "skills": [
         "./squash-pr",
         "./oh-pr",
-        "./d8-binary"
+        "./d8-binary",
+        "./arksteed",
+        "./arkts-runtime-build"
       ]
     },
     {
