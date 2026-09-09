@@ -1,6 +1,6 @@
 ---
 name: arkts-runtime-build
-description: "Build or compile the standalone OpenHarmony ArkTS ets_runtime repository on SSH host work when local WSL compilation is too slow. Also use it to execute build or test commands supplied by an applicable development skill on work, including commands that require ARM64/QEMU. Switch the remote checkout to master for ark sync, align it to the exact local commit through an already configured shared Git remote, mirror reviewed local source changes with rsync, then execute the requested command without a local fallback."
+description: "在 SSH 主机 work 构建独立 OpenHarmony ArkTS ets_runtime，适用于本地 WSL 编译过慢，以及执行开发 skill 提供的构建或测试命令（含 ARM64/QEMU）。默认复用远端依赖，通过已有共享 Git remote 对齐精确本地 commit，以 rsync 镜像经检查的源码改动后执行，不回退到本地。仅在构建失败且确认原因是代码未同步时执行 ark sync。"
 ---
 
 # ArkTS Runtime Remote Build
@@ -26,7 +26,7 @@ Safely shell-quote every derived path, ref, and argument.
    - `git rev-parse HEAD` for the exact commit base.
    - `git status --short` for tracked and untracked local changes.
    - `git for-each-ref --format='%(refname:short)' --points-at HEAD refs/remotes/` for remote-tracking refs whose tip is exactly the local `HEAD`. Ignore symbolic `HEAD` aliases.
-2. 在 `work` 映射的远端 `ets_runtime` 仓库中，先保护未提交改动，再切换 `master` 并同步：
+2. 在 `work` 映射的远端 `ets_runtime` 仓库中记录状态并保护未提交改动；此步骤不切换 `master`、不执行 `ark sync`：
    - 记录原分支（或 detached HEAD）、commit 和 `git status --short`。
    - 工作区有已暂存、未暂存或未跟踪文件时，**直接执行 `git stash push --include-untracked`，无需再次询问**；干净时跳过。使用带时间戳的说明，记录新 stash 的完整 commit ID。忽略文件（包括构建产物）留在原处，不使用 `--all`。
    - stash 成功且 `git status --porcelain --untracked-files=all` 为空后才继续；stash 失败或仍有残留改动时停止并报告，不通过 reset/clean/强制切换修复。
@@ -40,23 +40,19 @@ Safely shell-quote every derived path, ref, and argument.
    git rev-parse HEAD
    git status --short
    if test -n "$(git status --porcelain --untracked-files=all)"; then
-       git stash push --include-untracked -m "arkts-runtime-build pre-sync $(date -u +%Y%m%dT%H%M%SZ)"
+       git stash push --include-untracked -m "arkts-runtime-build pre-build $(date -u +%Y%m%dT%H%M%SZ)"
        git log -1 --format='stash: %H %s' refs/stash
    fi
    test -z "$(git status --porcelain --untracked-files=all)"
-   git switch master
-   test "$(git branch --show-current)" = master
-   ark sync
    REMOTE
    ```
 
-   `master` 仍是同步所需分支。暂存并确认干净后，若普通 `git switch master` 或 `ark sync` 仍失败，停止并报告；只有用户明确要求时才使用 `ark sync force`。
-3. After `ark sync`, read the remote `git branch --show-current`, `git rev-parse HEAD`, and `git status --short`. Require `master` at this checkpoint.
+3. 记录相关远端依赖仓库的 commit 和工作区状态，沿用现有依赖版本。默认跳过全仓同步；只有构建失败且确认代码未同步时，才进入[条件同步流程](#构建失败后的条件同步)。
 4. Align the remote `ets_runtime` checkout to the recorded local commit before mirroring source:
-   - If the synchronized remote `HEAD` already equals the local `HEAD`, keep `master` checked out.
+   - 若远端 `HEAD` 已等于记录的本地 `HEAD`，保留当前分支或 detached 状态，无需切换。
    - Otherwise, select a non-symbolic local remote-tracking ref that points exactly at the local `HEAD` and whose remote is already configured with the same URL on `work`.
-   - On `work`, fetch that named branch. Require the recorded local `HEAD` to exist as a commit and be reachable from the resulting `FETCH_HEAD` with `git merge-base --is-ancestor <local-head> FETCH_HEAD`, then run `git switch --detach <local-head>`. The shared branch may have advanced since the local fetch; checking reachability keeps that safe while detached HEAD preserves the synchronized `master` ref.
-   - 切换前若远端又出现未提交改动，按步骤 2 的暂存规则处理并确认干净，再正常切换；只复用暂存部分，不重复同步。没有匹配的共享 ref、fetch 失败、拉取历史不含本地 commit，或暂存后普通 detached 切换仍失败时，停止并报告。不要自动 push 本地 commit 或修改 remote URL。
+   - 在 `work` fetch 该命名分支，确认记录的本地 `HEAD` 是有效 commit，且 `git merge-base --is-ancestor <local-head> FETCH_HEAD` 成功，再执行 `git switch --detach <local-head>`。共享分支可以已经向前推进；检查可达性并 detached 到精确 commit，避免移动远端现有分支。此处按需 fetch 目标分支不是 `ark sync`，仍需保留。
+   - 切换前若远端又出现未提交改动，按步骤 2 暂存并确认干净，再正常切换。没有匹配的共享 ref、fetch 失败、拉取历史不含本地 commit，或暂存后普通 detached 切换仍失败时，停止并报告。不要自动 push 本地 commit 或修改 remote URL。
 5. Read the remote checkout state, `git rev-parse HEAD`, and `git status --short` again. Require the remote `HEAD` to equal the recorded local `HEAD` exactly. On mismatch, report both commit IDs and stop.
 6. Preview the local-to-remote source mirror:
 
@@ -95,11 +91,26 @@ ssh work "bash -lc 'cd \"\$HOME/ohos/a0/arkcompiler/ets_runtime\" && ark build'"
 
 Use `ark help` if a requested variant is unclear. Stream output and wait for the SSH command to finish.
 
+## 构建失败后的条件同步
+
+构建失败不等于需要同步。先保存失败命令、日志及当前版本，检查是否确实缺少待测代码要求的上游提交或配套代码。普通源码错误、配置/资源问题、测试失败，以及“较新依赖与较旧待测分支不兼容”都不能单独触发 `ark sync`；后者应先核对兼容版本，而不是继续追新。
+
+只有已发生构建失败、且有版本或源码证据确认原因是代码未同步时，才执行：
+
+1. 保留本次记录的本地 commit 作为测试基线。对需要同步的远端仓库按步骤 2 的规则自动 stash，记录原版本和 stash ID，并确认工作区干净。
+2. 从远端映射的 `ets_runtime` 目录切换 `master`，确认当前分支后运行 `ark sync`：
+
+   ```bash
+   ssh work "bash -lc 'cd \"\$HOME/ohos/a0/arkcompiler/ets_runtime\" && git switch master && test \"\$(git branch --show-current)\" = master && ark sync'"
+   ```
+
+   `master` 仅是条件同步时的要求。普通切换或同步失败时停止并报告；只有用户明确要求时才使用 `ark sync force`。
+3. 同步成功后记录远端分支、HEAD、状态及变化的依赖版本，确认同步检查点仍在 `master`。重新执行步骤 4–9，对齐原本地 commit 并再次镜像源码，不能直接把同步后的最新 runtime 当作待测版本。
+4. 用原命令重新构建，再执行请求的测试；依赖已变化，不能跳过构建或使用旧产物宣称通过。若仍失败，报告新的首个错误，不无依据地循环同步。
+
 ## Boundaries
 
-- `ark sync` updates base repositories on remote `master`; commit alignment then selects the exact local `ets_runtime` base; `rsync` finally updates its working tree.
 - The independent-repository entry point is `../../ark.py` through the user's `ark` wrapper. Never substitute the full-repository `../../build.sh` command.
-- Require `master` for the sync checkpoint. If the local base differs, build or test from a detached exact local `HEAD` without moving the remote `master` ref.
 - Never force a switch or automatically run reset, pull, rebase, clean, push, or remote-URL changes to repair state.
 - Never mirror local source until local and remote `HEAD` match exactly.
 - Never sync `.git`, local agent metadata, or Git-ignored outputs, and never use `--delete-excluded`.
@@ -108,4 +119,4 @@ Use `ark help` if a requested variant is unclear. Stream output and wait for the
 - Do not automatically restart after an SSH disconnect; first determine whether the previous sync, build, or test is still running.
 - Leave build and test outputs on `work` unless the user explicitly requests retrieval.
 
-报告远端映射目录、同步分支、最终 checkout 状态、本地与远端 commit ID、镜像摘要、`ark sync` 结果、实际构建或测试命令、适用时的 QEMU 检查、最终退出码及产物路径。若创建了 stash，同时报告原分支/commit、stash 完整 commit ID 和说明，注明尚未恢复。遇到 SSH、stash、分支切换、同步、commit 对齐、镜像、构建、测试或环境错误时，指出首个可处理的问题。
+报告远端映射目录、最终 checkout 状态、本地与远端 commit ID、相关依赖版本、镜像摘要、实际构建或测试命令、适用时的 QEMU 检查、最终退出码及产物路径。默认注明跳过 `ark sync`；若执行了同步，补充触发证据、同步分支和结果。若创建了 stash，同时报告原分支/commit、stash 完整 commit ID 和说明，注明尚未恢复。遇到 SSH、stash、分支切换、同步、commit 对齐、镜像、构建、测试或环境错误时，指出首个可处理的问题。
