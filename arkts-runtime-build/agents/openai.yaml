@@ -1,4 +1,0 @@
-interface:
-  display_name: "ArkTS Runtime Remote Build"
-  short_description: "在 SSH work 主机编译 ArkTS ets_runtime"
-  default_prompt: "Use $arkts-runtime-build to compile the current ets_runtime checkout on work."

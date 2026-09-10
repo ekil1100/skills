@@ -1,30 +1,42 @@
 ---
 name: arksteed
-description: Develop, optimize, debug, test, and review the CFG-based ArkSteed JIT compiler in arkcompiler/ets_runtime. Use whenever a task mentions ArkSteed or ark_steed, touches ecmascript/arksteed, or requests bytecode lowering, CFG/BB/Vertex work, PGO/IC optimization, register allocation, code generation, deoptimization, safepoints, GC barriers, or tests specifically for ArkSteed.
-compatibility: Requires an arkcompiler/ets_runtime checkout and its normal Ark build toolchain; ARM64 cross-testing requires QEMU.
+description: 开发、优化、调试、测试和检视 arkcompiler/ets_runtime 中基于 CFG 的 ArkSteed JIT。任务提及 ArkSteed、ark_steed、涉及 ecmascript/arksteed，或要求处理 ArkSteed 的字节码 lowering、CFG/BB/Vertex、PGO/IC 优化、寄存器分配、代码生成、反优化、安全点、GC 屏障及测试时使用。
+compatibility: 需要 ets_runtime 源码及正常构建工具链；ARM64 跨架构测试需要 QEMU；源码对照需要可读取的 V8 源码。
 ---
 
 # ArkSteed
 
-ArkSteed is a CFG-based JIT: `Graph` contains `BB`s, and blocks contain `Vertex` operations. It is separate from the normal Circuit/Gate + PassManager compiler pipeline.
+ArkSteed 是基于 CFG 的 JIT：`Graph` 包含基本块 `BB`，基本块包含操作 `Vertex`。它与旧的 Circuit/Gate + PassManager 编译流水线独立。
 
-## Scope rule
+本文负责开发指导、构建测试命令及验证标准。仓库路径和命令均相对 **ets_runtime checkout 根目录**；`references/` 文档链接相对本 skill 目录。
 
-Keep ArkSteed optimizations inside:
+## 任务分流
 
-```text
-ecmascript/arksteed/**
-```
+所有模式都先完成流程第 1、2 步的定位、源码阅读与优化项对比报告，再按任务授权继续：
 
-Keep tests under its test directory. Read shared compiler/runtime code to understand semantics and ABI, but do not modify it merely for convenience.
+| 任务模式 | 执行范围 |
+|---|---|
+| 解释、只读分析或检视 | 阅读和分析源码，给出依据与结论；不修改文件，不执行格式化、构建或测试 |
+| 开发、优化、修复 | 完成第 3–6 步的局部实现、格式化、聚焦验证与实现报告 |
+| 仅构建或测试 | 不修改源码，按第 5 步执行请求的命令与配置 |
+| 提 PR、准备合入 | 整理变更与提交材料，不自动构建或测试；未要求全量功能测试时，不以未测试阻塞提 PR |
+| 用户明确要求全量功能测试 | 读取并执行[全量功能测试指南](references/full-functional-tests.md)，只运行用户要求的范围 |
 
-Only edit outside ArkSteed when a local CFG, lowering, metadata, or codegen solution is insufficient. Explain the reason before making such an edit. Build registration and genuinely shared ABI/runtime defects are valid exceptions; easier reuse is not.
+## 修改范围
 
-## Workflow
+- ArkSteed 优化默认限于 `ecmascript/arksteed/**`，测试放在其 `test/` 下。
+- 优化项对比报告和实现报告保存在仓库 `.agents/` 下，不扩大运行时代码的可修改范围。
+- 共享编译器、解释器和运行时代码用于对照语义与 ABI，不因复用方便而修改。
+- 只有局部 CFG、lowering、元数据或代码生成方案不足时，才考虑修改范围外的代码；修改前说明原因和影响。构建注册、优化必需的 PGO 采集/反馈链路补充，或确实共享的 ABI/运行时缺陷可以构成理由。
+- 不把 ArkSteed 优化加进旧编译流水线。
 
-### 1. Find the current implementation
+## 工作流程
 
-ArkSteed changes quickly. Do not rely on a fixed file map. Search by the task's bytecode, operation, Vertex, stub, assertion, or behavior:
+### 1. 定位当前实现
+
+先读取仓库及相关目录的 `AGENTS.md`。ArkSteed 变化快，以当前源码、邻近测试和近期提交为准，不依赖记忆中的文件地图。
+
+按任务中的字节码、操作、Vertex、stub、断言或行为搜索：
 
 ```bash
 rg -n '<term>' ecmascript/arksteed
@@ -33,32 +45,63 @@ rg -n '<exact-symbol>' ecmascript | grep -v '^ecmascript/arksteed/'
 git log -n 10 --oneline -- ecmascript/arksteed
 ```
 
-Use current code, nearby tests, and recent commits as the source of truth. If a remembered symbol is absent, find its current equivalent instead of recreating it.
+记忆中的符号不存在时，先找到当前等价实现，不直接重新创建。
 
-### 2. Trace only the affected path
+### 2. 必读解释器、旧 JIT 与 V8 实现，并生成对比报告
 
-Follow as much of this chain as the task requires:
+**解释器、旧 JIT 和 V8 的对应代码阅读是每次任务的前置步骤，不以“涉及语义变更”或“需要设计比较”为条件。** 在形成方案、修改代码或给出结论前，用 `read` 阅读三方的实际实现；`rg` 只用于定位。阅读范围围绕当前问题，不扩展为遍历整个子系统。
+
+1. **解释器**：阅读 `ecmascript/interpreter/AGENTS.md`、`ecmascript/ic/AGENTS.md`，再读 `ecmascript/interpreter/interpreter-inl.cpp` 中的 C++ 实现和 `ecmascript/compiler/interpreter_stub.cpp` 中的汇编解释器实现。沿实际调用追到承担语义的 stub、runtime 或 factory；核对相关重载及有/无反馈分支，不止看入口。
+2. **旧 JIT**：阅读 `ecmascript/jit/AGENTS.md`、`ecmascript/compiler/AGENTS.md`，在旧 Circuit/Gate + PassManager 流水线中追踪对应的 lowering、优化、代码生成及运行时处理。仅阅读同目录的汇编解释器不能替代旧 JIT 对照。
+3. **V8**：读取对应实现，以 Maglev 为主要对照入口，并追到相关运行时、分配、GC 或反优化逻辑。优先使用已提供或已确认的本地 checkout；位置未知时向用户询问一次。本地源码不可用时，通过 `gh` 或 `curl` 获取 `github.com/v8/v8` 上固定 commit 的官方源码，记录版本。获取失败时报告阅读阻塞，不跳过此项或用记忆替代。
+
+需要补充 PGO 采集时，在本步骤阅读 `ecmascript/pgo_profiler/AGENTS.md` 与 `docs/aot-guide_zh.md`，作为优化项对比报告和实现方案的依据。
+
+对照输入/HClass 来源、布局读取、初始化、异常、分配与回退契约。区分运行时不变量、通用路径实际处理的分支，以及 JIT 固定布局或反馈特化新增的假设。增删 guard 时，检查初始化及相关可达变更点，并说明对应的来源保证、guard 或失效依赖。断言不是通用回退。
+
+没有直接等价实现时，说明已检查的相近路径和差异；必要源码缺失时标记阅读阻塞，不能宣称三方阅读完成。未证实的假设单列，并保留必要检查或通用回退。借鉴 V8 的设计，但保留 Ark 的对象布局、tagged 编码、GC、ABI 和反优化契约。
+
+然后追踪 ArkSteed 中受影响的链路，明确当前符号、语义及可写范围：
 
 ```text
-bytecode → CFG construction/optimization → register allocation
-         → codegen → deopt/safepoint/GC/runtime behavior
+字节码 → CFG 构建/优化 → 寄存器分配
+       → 代码生成 → 反优化/安全点/GC/运行时行为
 ```
 
-Before editing, identify the current symbols involved and the intended writable scope.
+#### 优化项对比报告
 
-### 3. Implement the smallest complete change
+阅读完成后、进入实现前，将报告保存到 **ets_runtime 仓库根目录下的 `.agents/<topic>-optimization-comparison.md`**，其中 `<topic>` 使用当前字节码或任务的简短名称。已有同主题报告时先阅读并更新，不覆盖无关内容。只读模式仅在回复中输出同格式报告，注明未落盘。
 
-- Prefer an ArkSteed-local CFG transformation, Vertex, analysis, lowering, or assembler sequence.
-- When a design comparison would help, use V8 Maglev as a reference. Prefer an already-provided local V8 checkout; otherwise ask the user for its path once. If unavailable, continue with `gh` or `curl` against `github.com/v8/v8`. Adapt the design to ArkSteed's CFG, runtime, GC, and deopt contracts instead of copying it directly.
-- Preserve a correct generic fallback for unsupported or stale feedback.
-- Keep operation effects and value representations truthful.
-- Follow current ArkSteed allocation, ownership, and lifetime conventions.
-- Check both x64 and ARM64 for platform-neutral codegen or ABI changes.
-- Do not add ArkSteed optimizations to the normal compiler pipeline.
+报告先注明任务范围、Ark 与 V8 的源码版本、三方已读关键函数及解释器语义基线，再逐项填写以下固定表头；每行对应一个可独立判断的优化项，不增改列名：
 
-### 4. Format modified C/C++ code
+| 编号 | 优化项 | 旧 JIT | v8 maglev | arksteed | why |
+|---|---|---|---|---|---|
 
-Before building or finishing an ArkSteed code change, format every modified C/C++ line with OpenHarmony's pinned formatter and the source tree's `.clang-format`. From the `ets_runtime` root, preview the affected range first:
+- `旧 JIT`、`v8 maglev` 两列各只能填写：**支持、部分支持、不支持**。按当前任务范围判断；部分支持需注明覆盖条件与缺口。状态必须有源码依据，不能把未找到或未核实的实现直接判为不支持；证据不足的项在表外单列为待核对。
+- `arksteed` 列只能填写：**实现、不实现、部分实现、后续优化**，表示实现取舍，不自动代表代码已经完成。`实现` 表示纳入本轮或已有实现；`不实现` 表示不采纳；`部分实现` 表示只覆盖明确子集；`后续优化` 表示本轮暂缓。报告按编号另列当前代码状态、计划改动与实际验证结果，区分计划和完成事实。
+- `why` 对 **不实现、部分实现、后续优化** 必须写清具体原因：与 Ark 语义/架构的差异、所缺基础能力、复杂度或当前范围限制。部分实现说明已覆盖与未覆盖部分；后续优化说明前置条件。避免只写“复杂”“暂不支持”或“后续再做”。
+- 每项注明旧 JIT、V8 Maglev 和 ArkSteed 的关键源码位置；V8 额外优化的复杂度及判断依据写入 `why`，采用第 3 步的分级标准。
+
+完成标准：报告已保存并给出路径（只读模式提供同格式正文），状态和取舍均有依据；后续实现或验证改变结论时同步更新报告。
+
+### 3. 实现最小完整变更
+
+**以本任务对应的旧 JIT 优化为实现基线，再评估 V8 Maglev 的额外优化。**
+
+- 先对齐旧 JIT 已支持的优化；部分支持的项以其实际覆盖范围为基线。未对齐的项必须在报告中明确列出，并在 `why` 解释原因，不能只实现通用路径就宣称达到旧 JIT 优化基线。
+- 对 V8 Maglev 已支持的额外优化，评估其移植到 ArkSteed 的复杂度，而不是只看 V8 代码行数。**低、中复杂度的优化可以纳入本轮实现**；高复杂度项默认不扩大本轮范围，列为后续优化或不实现，并说明原因。
+- 复杂度按代码改动范围、基础能力依赖、GC/反优化/ABI 风险及验证成本综合判断：**低**为复用现有能力的局部变换；**中**为有界的 Vertex、分析、代码生成或 PGO 采集扩展，能沿用现有 GC/反优化/ABI 契约；**高**为需要新增关键基础能力、改变上述契约或大范围跨模块重构。
+- 按报告中的取舍逐项交付可运行的最小完整变更，再扩展下一项；只读或仅测试任务不因报告列为“实现”而自动修改代码。
+- 优先采用 ArkSteed 局部 CFG 变换、Vertex、分析、lowering 或汇编序列；优化所需的 PGO 反馈缺失或不足时，一并补齐必要的采集、反馈存储和 ArkSteed 消费链路。
+- 采集侧按实际入口修改，不强行限定在 ArkSteed 目录内；涉及反馈字段或格式变化时同步相关读写方并核对兼容性，补充反馈命中及缺失/失效回退验证。
+- 保留对不支持或过期反馈的正确通用回退。
+- 如实声明操作副作用和值表示，不隐藏读写、调用、分配、异常或反优化行为。
+- 沿用当前对象分配、所有权、生命周期和寄存器约定。
+- 与平台无关的代码生成或 ABI 改动同时核对 x64、ARM64。
+
+### 4. 格式化修改过的 C/C++ 行
+
+构建或完成代码修改前，使用 OpenHarmony 固定版本 formatter 和仓库 `.clang-format`。先预览本次修改涉及的范围：
 
 ```bash
 ../../prebuilts/clang/ohos/linux-x86_64/llvm/bin/git-clang-format \
@@ -66,7 +109,7 @@ Before building or finishing an ArkSteed code change, format every modified C/C+
   --style=file --diffstat HEAD -- <modified-cpp-files>
 ```
 
-Then apply formatting only to the task's changed lines:
+再仅格式化本次修改的行：
 
 ```bash
 ../../prebuilts/clang/ohos/linux-x86_64/llvm/bin/git-clang-format \
@@ -74,27 +117,26 @@ Then apply formatting only to the task's changed lines:
   --style=file -f HEAD -- <modified-cpp-files>
 ```
 
-- Use a fixed comparison point that isolates the task; `HEAD` is the normal choice for working-tree changes.
-- Pass an explicit list of modified `.c`, `.cc`, `.cpp`, `.cxx`, `.h`, or `.hpp` files. Do not format unrelated dirty files.
-- Do not use an unqualified `clang-format` from `PATH`; it may be a different version from the OpenHarmony prebuilt.
-- Do not blindly run `clang-format -i` across legacy files. It can reformat thousands of untouched lines and obscure the functional review.
-- Preview continuation macros such as `arksteed_opcode_list.h`: if one changed entry expands formatting to the entire macro, preserve the existing macro layout and align the new entry with its neighbors unless broad reformatting was explicitly requested.
-- `clang-format` is for C/C++ sources; use the language-appropriate formatter for Python, JavaScript, TypeScript, or documentation when needed.
+- 选择能隔离本次任务的固定比较点；工作区修改通常使用 `HEAD`。
+- 显式列出修改过的 `.c`、`.cc`、`.cpp`、`.cxx`、`.h` 或 `.hpp` 文件，不触碰无关脏文件。
+- 不使用 `PATH` 中未限定版本的 `clang-format`，不对整个旧文件直接运行 `clang-format -i`。
+- 对 `arksteed_opcode_list.h` 等续行宏先检查预览；单个条目触发整段宏重排时，保持既有布局，只对齐修改项，除非用户明确要求整体格式化。
+- 非 C/C++ 文件使用对应语言的格式检查方式。
 
-Run the preview command again after formatting. It should report that clang-format would not modify any files. Also run `git diff --check` before finishing.
+格式化后再次预览，确认格式化工具不再产生额外修改，并执行 `git diff --check`。
 
-### 5. 开发阶段构建与聚焦验证
+### 5. 构建与聚焦验证
 
-本节用于开发阶段的快速反馈，不能代替第 6 节的合入前验收。以下仓库路径和命令均相对 **ets_runtime checkout 根目录**，不是 skill 目录。
+先阅读 `ecmascript/arksteed/test/README.md`，按当前 runner 的接口和注解编写、选择测试。runner 默认构建并启用 ArkSteed，无需先重复单独构建。
 
-单独构建 x64 debug：
+仅需构建 x64 Debug 时：
 
 ```bash
 (cd ../.. && python3 ark.py x64.debug \
   --gn-args=ets_runtime_enable_ark_steed=true)
 ```
 
-runner 默认自动构建并启用 ArkSteed，因此无需先重复执行单独构建。按本次改动选择聚焦用例；`-I` 是相对测试根目录的路径，例如 `jittest/createemptyarray_inline_allocation`：
+开发阶段选择聚焦用例；`-I` 是相对测试根目录的路径，如 `jittest/createemptyarray_inline_allocation`：
 
 ```bash
 # Focused x64 debug validation
@@ -106,84 +148,54 @@ python3 ecmascript/arksteed/test/run_arksteed_tests.py \
   -p arm64 -m debug -I '<case-or-directory>' -s -v
 ```
 
-仅当已有与当前源码、依赖、架构、模式及 GN 配置匹配的成功构建时，才追加 `-F`。rebase、`repo sync` 或依赖变化后，首次验证重新构建，不能用旧产物宣称新版本通过。
+- 只执行任务需要且用户授权的配置；未运行项标为未验证。
+- 仅当已有与当前源码、依赖、架构、模式及 GN 配置匹配的成功构建时使用 `-F`。源码、rebase 或依赖变化后的首次验证重新构建。
+- ARM64 跨架构测试需要 `qemu-aarch64-static` 或 `qemu-aarch64`。runner 负责配置 `run_with_qemu=true`、构建 host `es2abc` 及设置 sysroot、库路径。
+- 同一 checkout/产物的不同构建配置顺序执行；已有任务占用时先核对状态，不重复启动或并发切换配置。
+- 优化测试应证明目标方法确实编译、前后行为一致、CFG/代码形态符合预期，以及回退或反优化行为。分配与寄存器改动补充压力和强制 GC 覆盖；生成代码注释不能替代运行时路径命中证据。
+- 默认验证受支持的普通 GC 路径，不默认增加 CMC 专项。用户明确要求或项目及环境已确认支持时，再增加 CMC 专项；未运行单独注明。
+- 记录源码版本、命令、退出码、用例数量和日志路径。验证通过后，无新改动或证据不重复扩大检查。
 
-非 ARM64 主机需要 `qemu-aarch64-static` 或 `qemu-aarch64`。ARM64 runner 会配置 `run_with_qemu=true`、构建 host `es2abc`、设置 sysroot/库路径并调用 QEMU。
+开发阶段的聚焦验证与提 PR 是独立流程。仅要求提 PR 或准备合入时，不额外运行或补齐测试；PR 模板中的测试项也不构成执行测试的授权。只有用户明确要求全量功能测试时，才读取并执行[全量功能测试指南](references/full-functional-tests.md)。
 
-在 SSH 主机 `work` 执行本文任何构建或测试命令时，使用 `arkts-runtime-build` skill 对齐 checkout、镜像源码并检查执行环境；本 skill 提供 ArkSteed 命令与验收标准。external 用例被 Git 忽略，须单独核对实际执行主机上的用例来源和版本，不能假定源码同步已包含它们。
+### 6. 生成面向初学者的实现报告
 
-优化测试应证明方法确实编译、编译前后行为一致、CFG/代码形态符合预期，以及回退或 deopt 行为。分配与寄存器相关改动补充压力和强制 GC 覆盖；代码生成注释只能证明生成了某条路径，不能代替运行时命中证据。
+开发、优化、修复任务在完成本轮实现和第 5 步的验证记录后，将实现报告保存到 **ets_runtime 仓库根目录下的 `.agents/<topic>-implementation-report.md`**，`<topic>` 与第 2 步的优化项对比报告保持一致。已有同主题报告时先阅读再更新，保留无关内容。只读、仅构建/测试或仅提 PR 的任务不自动生成此报告。
 
-默认验证受支持的普通 GC 路径。**CMC 不作为默认合入门槛**；未运行或环境不支持时单独注明、不阻塞。仅当用户明确要求，或仓库和执行环境已确认支持时，才增加 CMC 专项。
+**把读者当作第一次接触 ArkSteed 和本次实现的初学者，用中文从整体到细节讲清完整实现思路。** 不要求读者先懂编译器术语，也不以变更清单、diff 摘要或优化项对比表代替讲解。报告按以下顺序组织：
 
-### 6. 合入前验收：按 PR 模板逐项完成
+1. **问题与目标**：用通俗语言和一个最小例子解释原先怎么做、存在什么问题、本次要达到什么效果，以及不在本轮范围内的内容。注明源码基线、当前提交及未提交改动状态，关联第 2 步的对比报告。
+2. **必要背景**：只介绍理解本次实现必需的概念；术语首次出现时解释含义和作用，例如 CFG、BB、Vertex、PGO、guard 或反优化，避免用更多未解释的术语解释一个术语。
+3. **整体方案**：先说明核心思路、为什么选择该方案及主要取舍，再用流程图或文字调用链串起输入、处理阶段、输出和回退。列出涉及的文件、关键函数与各自职责，让读者先看到完整结构，再进入局部代码。
+4. **逐步实现与代码详解**：沿实际控制流和数据流逐项展开关键改动，解释输入从哪里来、经过哪些判断或转换、结果交给谁。每个关键设计点都附上足以理解其逻辑的**实际代码片段**，注明仓库相对路径、函数/类型名及对应行号；片段前说明用途，片段后按逻辑块解释“做什么、为什么这样写、依赖什么条件”。涉及行为变化时对照修改前后；不能只给源码位置让读者自行理解，也不能只贴代码不讲解。
+5. **端到端例子**：用一个具体输入贯穿整体方案与代码细节，逐步展示关键状态或值如何变化、会进入哪些函数和分支、最终得到什么结果。有特化、快速路径或回退时，再用一个不满足条件的输入解释为什么走通用路径或反优化。
+6. **正确性与边界**：说明本次实现如何保持原有语义，以及适用的异常、布局、GC、寄存器、ABI、架构差异、反馈失效和回退约束。逐项对应实际代码中的保证或检查；不适用的内容简要说明，不堆砌无关知识。
+7. **验证与未完成项**：引用第 5 步的实际命令、配置、结果与日志，解释每个关键用例在证明什么、为何能覆盖相应改动。区分已实现、已验证、验证失败、未验证和后续优化；未执行或受环境阻塞时照实记录，不为写报告额外扩大构建测试范围。
 
-准备 PR 或合入前，先读取 ets_runtime checkout 中的 `.gitee/PULL_REQUEST_TEMPLATE.zh-CN.md` 与 `ecmascript/arksteed/test/README.md`。以当前模板为准；当前要求是 **x64 / ARM64 × Debug / Release 四套功能测试，每套都包含 external，以及 Release JIT 性能无回退**。聚焦用例通过、只构建成功或仅检查对象文件，都不等于完成合入验收。
+代码片段以最终实际源码为准；可以省略无关上下文，但要明确标示省略位置，不能省略讲解所依赖的关键判断、回退或副作用。伪代码只能辅助说明，不能替代真实实现代码；计划中的代码不能当作已实现内容展示。后续实现或验证结果变化时同步更新报告。
 
-#### 6.1 准备并确认 external 用例
+完成标准：报告已保存，初学者无需预先阅读源码即可顺着报告理解“问题 → 方案 → 调用链 → 关键代码 → 具体例子 → 正确性与验证”；关键设计点均有代码和解释，未完成项清晰，交付回复给出报告路径。
 
-external 是独立 Git 仓库提供的额外用例，默认放在 `ecmascript/arksteed/test/external/`，该目录被 `.gitignore` 忽略。它不是固定指代 Test262 或某套公开测试。
+## 正确性检查
 
-1. 从用户、维护方或项目配置取得约定的仓库 URL 与版本，记录实际 commit。仓库未提供固定地址时先询问，不猜测地址或替换成其他测试集；已有目录先核对来源、版本和本地修改，避免覆盖用户工作。
-2. 在实际测试主机准备好该目录，并按当前 runner 格式检查：每个用例目录恰有一份 JS/TS 源码和 `expected_output.txt`，运行参数/结构约束遵循 README 的注解协议。旧版 runner 的 `--external-repo`、`--external-dir`、`--skip-external` 参数不适用于当前 runner。
-3. 确认约定用例均可被收集。当前 runner 遍历整个测试根目录，external 准备好后会被全量运行纳入；可用 `-I external` 单独定位问题，但该筛选不能代替完整验收。
-4. external 缺失、无法获取、不兼容或收集到零个用例时，记录为未验证/阻塞。仅内部用例通过时，不能勾选模板中“含 external”的已通过项。
+按改动范围检查适用项：
 
-#### 6.2 执行四套全量功能测试
+- 字节码接纳范围与各形式的 CFG lowering 一致。
+- CFG 前驱、后继、Phi、帧状态、异常捕获边和反优化边有效。
+- 副作用和值表示与实际执行一致。
+- PGO/IC 假设有 guard 或失效依赖，并具有安全回退。
+- 寄存器约束、破坏集合、溢出槽及 tagged/untagged 表示正确。
+- 编译期间不以不安全裸指针持有可移动堆对象。
+- 可触发 GC 的调用通过安全点暴露所有 tagged 根。
+- 堆写入遵循本地/共享及分代屏障要求。
+- 反优化元数据与运行时解码器、ABI 一致。
+- 受影响的 x64、ARM64 实现保持正确。
 
-完成 external 准备后，从 ets_runtime 根目录执行；需要并行时可追加 `-j <N>`：
+## 检视与交付
 
-```bash
-runner=ecmascript/arksteed/test/run_arksteed_tests.py
+检视优先关注正确性、缺失回退或反优化路径、GC 风险、ABI 不匹配及不必要的范围外修改。
 
-# Full suites, including the prepared external corpus
-python3 "$runner" -p x64   -m debug   -s
-python3 "$runner" -p x64   -m release -s
-python3 "$runner" -p arm64 -m debug   -s
-python3 "$runner" -p arm64 -m release -s
-```
-
-每个配置保存源码/依赖版本、external commit、实际命令、退出码、收集/执行/通过/失败数量及日志/报告路径，并核对 external 的实际执行数量非零、没有漏跑约定用例。runner 产物位于其报告的 `/tmp/arksteed-<platform>-<mode>-<timestamp>/`。
-
-只有全部约定用例执行且通过，才能将对应配置标记为通过。`-s` 提前停止、临时排除失败用例或只复跑部分目录，都不能当作全量通过；失败项可以注明基线复现情况，但不能改判为已通过。
-
-#### 6.3 Release JIT 性能无回退：用户人工确认
-
-默认由用户手动验证并确认性能，agent 自动化负责功能测试的构建、执行和结果汇总，不自动运行性能套件。功能测试完成后，性能项保持“待用户确认”，不能据此宣称整个合入前验收已完成。
-
-收到明确确认后，记录对应的候选 commit、用户结论及用户提供的基线/报告信息，标记为“用户确认通过”，与 agent 实际执行的测试区分。待合入代码发生变化后，确认其是否仍覆盖当前版本；不能沿用旧版本确认。
-
-仅当用户另行明确委托 agent 执行性能测试时，才按以下要求开展：
-
-- 使用项目约定的 JIT 性能套件、比较基线和判定标准；入口或标准缺失时向维护方确认，不能编造命令、阈值或以功能测试代替性能测试。
-- 在同一真实硬件上对比基线与待合入版本，保持依赖、Release 构建配置、输入和运行参数一致；确认测到的是 ArkSteed 编译代码，关闭非必要调试/图/汇编日志，按性能套件要求预热、重复测量并记录波动。
-- QEMU 可用于 ARM64 功能正确性验证，不能据此宣称真实硬件性能无回退。局部优化另附针对性 benchmark；不能只凭少了一次 stub 调用或静态代码形态宣称性能通过。
-- 记录基线/候选 commit、硬件、配置、命令、原始结果与比较结论。性能未运行或缺少可比基线时，该项保持未验证/阻塞。
-
-纯文档等确实不涉及的改动可按模板逐项注明理由；环境不可用、缺少 external 或测试失败不是“不涉及”。只有所有适用项均有通过证据，才报告合入前验收完成。
-
-## Correctness checklist
-
-Check only the applicable items:
-
-- Bytecode admission agrees with CFG lowering for every admitted form.
-- CFG predecessors, successors, Phis, frame state, catch edges, and deopt edges remain valid.
-- Reads, writes, calls, allocation, exceptions, and deopt effects are not hidden from analyses.
-- PGO/IC assumptions are guarded or dependency-tracked, with a safe fallback.
-- Register constraints, clobbers, spills, and tagged/untagged representations are correct.
-- Movable heap objects are not retained as unsafe raw pointers during compilation.
-- GC-capable calls expose tagged roots through safepoints.
-- Heap stores use the required local/shared and generational barriers.
-- Deopt metadata agrees with its runtime decoder and ABI.
-- Architecture-specific behavior is correct on x64 and ARM64 when affected.
-
-## Review and report
-
-For review, prioritize correctness bugs, missing fallback/deopt paths, GC hazards, ABI mismatches, and unnecessary edits outside ArkSteed.
-
-Finish with:
-
-1. what changed;
-2. whether the change stayed inside ArkSteed and why any external edit was needed;
-3. 实际执行的格式化、构建、测试命令及结果，以及未执行项和原因；合入前按 PR 模板逐项报告验收状态；
-4. remaining architecture, GC, ABI, or performance risk.
+- **解释或只读检视**：先给结论，再给关键源码位置、依据及未证实项；有问题时按严重程度列出，不套用修改/测试完成报告。
+- **实现或测试交付**：说明修改文件与结果、范围外改动理由、实际格式化/构建/测试命令及结果、未执行项和剩余架构/GC/ABI/性能风险；实现任务另附第 6 步的实现报告路径。
+- **PR 交付**：按实际情况填写模板；未执行测试时注明“未执行（用户未要求）”，不勾选已通过或不涉及，不为补齐模板自动启动测试。
+- **全量功能测试交付**：仅在用户明确要求后按测试指南报告实际范围和结果；区分通过、失败与未执行，不沿用已被新代码变更覆盖的旧结果。

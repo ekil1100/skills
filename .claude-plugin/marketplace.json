@@ -7,7 +7,7 @@
         "./oh-pr",
         "./d8-binary",
         "./arksteed",
-        "./arkts-runtime-build"
+        "./ets-runtime-remote-build"
       ]
     },
     {
