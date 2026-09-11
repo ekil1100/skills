@@ -1,6 +1,6 @@
 ---
 name: arksteed
-description: 开发、优化、调试、测试和检视 arkcompiler/ets_runtime 中基于 CFG 的 ArkSteed JIT。任务提及 ArkSteed、ark_steed、涉及 ecmascript/arksteed，或要求处理 ArkSteed 的字节码 lowering、CFG/BB/Vertex、PGO/IC 优化、寄存器分配、代码生成、反优化、安全点、GC 屏障及测试时使用。
+description: 开发、优化、调试、测试和检视 arkcompiler/ets_runtime 中基于 CFG 的 ArkSteed JIT。任务提及 ArkSteed、ark_steed、涉及 ecmascript/arksteed，或要求处理 ArkSteed 的字节码 lowering、CFG/BB/Vertex、PGO/IC 优化、寄存器分配、代码生成、反优化、安全点、GC 屏障及测试时使用；使用 JIT-Bench 做 ArkSteed 性能测试、版本回归或与 V8 对比时也使用。
 compatibility: 需要 ets_runtime 源码及正常构建工具链；ARM64 跨架构测试需要 QEMU；源码对照需要可读取的 V8 源码。
 ---
 
@@ -18,9 +18,10 @@ ArkSteed 是基于 CFG 的 JIT：`Graph` 包含基本块 `BB`，基本块包含�
 |---|---|
 | 解释、只读分析或检视 | 阅读和分析源码，给出依据与结论；不修改文件，不执行格式化、构建或测试 |
 | 开发、优化、修复 | 完成第 3–6 步的局部实现、格式化、聚焦验证与实现报告 |
-| 仅构建或测试 | 不修改源码，按第 5 步执行请求的命令与配置 |
+| 仅构建或功能测试 | 不修改源码，按第 5 步执行请求的命令与配置 |
+| JIT 性能测试、性能回归或跨引擎对比 | 读取并执行 [JIT-Bench 性能测试指南](references/jit-performance-tests.md)，只测量任务要求的范围，不套用功能测试 runner |
 | 提 PR、准备合入 | 整理变更与提交材料，不自动构建或测试；未要求全量功能测试时，不以未测试阻塞提 PR |
-| 用户明确要求全量功能测试 | 读取并执行[全量功能测试指南](references/full-functional-tests.md)，只运行用户要求的范围 |
+| 用户明确要求全量功能测试 | 读取并执行[全量功能测试指南](references/full-functional-tests.md)，只运行用户要求的范围；当前配置失败后停止后续配置并报告 |
 
 ## 修改范围
 
@@ -151,12 +152,14 @@ python3 ecmascript/arksteed/test/run_arksteed_tests.py \
 - 只执行任务需要且用户授权的配置；未运行项标为未验证。
 - 仅当已有与当前源码、依赖、架构、模式及 GN 配置匹配的成功构建时使用 `-F`。源码、rebase 或依赖变化后的首次验证重新构建。
 - ARM64 跨架构测试需要 `qemu-aarch64-static` 或 `qemu-aarch64`。runner 负责配置 `run_with_qemu=true`、构建 host `es2abc` 及设置 sysroot、库路径。
-- 同一 checkout/产物的不同构建配置顺序执行；已有任务占用时先核对状态，不重复启动或并发切换配置。
+- 同一 checkout/产物的不同构建配置顺序执行；同一配置成功构建后，内部/external 功能测试可按[全量功能测试指南](references/full-functional-tests.md)共用只读产物并行运行。已有任务占用时先核对状态，不重复启动或并发切换配置。
 - 优化测试应证明目标方法确实编译、前后行为一致、CFG/代码形态符合预期，以及回退或反优化行为。分配与寄存器改动补充压力和强制 GC 覆盖；生成代码注释不能替代运行时路径命中证据。
 - 默认验证受支持的普通 GC 路径，不默认增加 CMC 专项。用户明确要求或项目及环境已确认支持时，再增加 CMC 专项；未运行单独注明。
 - 记录源码版本、命令、退出码、用例数量和日志路径。验证通过后，无新改动或证据不重复扩大检查。
 
 开发阶段的聚焦验证与提 PR 是独立流程。仅要求提 PR 或准备合入时，不额外运行或补齐测试；PR 模板中的测试项也不构成执行测试的授权。只有用户明确要求全量功能测试时，才读取并执行[全量功能测试指南](references/full-functional-tests.md)。
+
+性能测量使用独立的 [JIT-Bench 性能测试指南](references/jit-performance-tests.md)。仅在任务要求性能测试、性能回归或跨引擎对比时执行；功能测试通过不代表性能无回退，提 PR 或全量功能测试也不会自动触发性能测试。
 
 ### 6. 生成面向初学者的实现报告
 

@@ -42,7 +42,7 @@ npx skills add https://github.com/ekil1100/skills --skill oh-pr -y -g
 npx skills add https://github.com/ekil1100/skills --skill d8-binary -y -g
 ```
 
-**arksteed** - 开发、优化、调试和检视 ArkSteed JIT 编译器，包含源码对照、实现报告及按需功能测试。远端构建或测试配合 `ets-runtime-remote-build` 使用。
+**arksteed** - 开发、优化、调试和检视 ArkSteed JIT 编译器，包含源码对照、实现报告、按需功能测试及 JIT-Bench 性能测试。远端构建或测试配合 `ets-runtime-remote-build` 使用。
 
 ```shell
 npx skills add https://github.com/ekil1100/skills --skill arksteed -y -g
