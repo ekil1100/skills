@@ -98,7 +98,7 @@ git log -n 10 --oneline -- ecmascript/arksteed
 - 保留对不支持或过期反馈的正确通用回退。
 - 如实声明操作副作用和值表示，不隐藏读写、调用、分配、异常或反优化行为。
 - 沿用当前对象分配、所有权、生命周期和寄存器约定。
-- 与平台无关的代码生成或 ABI 改动同时核对 x64、ARM64。
+- 与平台无关的代码生成或 ABI 改动同时核对 x64、ARM64 的源码实现；构建与运行验证范围按第 5 步执行。
 
 ### 4. 格式化修改过的 C/C++ 行
 
@@ -137,14 +137,17 @@ git log -n 10 --oneline -- ecmascript/arksteed
   --gn-args=ets_runtime_enable_ark_steed=true)
 ```
 
-开发阶段选择聚焦用例；`-I` 是相对测试根目录的路径，如 `jittest/createemptyarray_inline_allocation`：
+开发阶段默认只构建和验证 **x64 Debug**，包括架构敏感改动。选择聚焦用例；`-I` 是相对测试根目录的路径，如 `jittest/createemptyarray_inline_allocation`：
 
 ```bash
 # Focused x64 debug validation
 python3 ecmascript/arksteed/test/run_arksteed_tests.py \
   -p x64 -m debug -I '<case-or-directory>' -s -v
+```
 
-# Architecture-sensitive changes also need ARM64 validation
+ARM64/QEMU 构建和测试耗时较长，仅在用户明确要求 ARM64 验证时运行：
+
+```bash
 python3 ecmascript/arksteed/test/run_arksteed_tests.py \
   -p arm64 -m debug -I '<case-or-directory>' -s -v
 ```
