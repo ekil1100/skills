@@ -1,6 +1,6 @@
 ---
 name: arksteed
-description: 开发、优化、调试、测试和检视 arkcompiler/ets_runtime 中基于 CFG 的 ArkSteed JIT。任务提及 ArkSteed、ark_steed、涉及 ecmascript/arksteed，或要求处理 ArkSteed 的字节码 lowering、CFG/BB/Vertex、PGO/IC 优化、寄存器分配、代码生成、反优化、安全点、GC 屏障及测试时使用；使用 JIT-Bench 做 ArkSteed 性能测试、版本回归或与 V8 对比时也使用。
+description: 开发、优化、调试、测试和检视 arkcompiler/ets_runtime 中基于 CFG 的 ArkSteed JIT。任务提及 ArkSteed、ark_steed、涉及 ecmascript/arksteed，或要求处理 ArkSteed 的字节码 lowering、CFG/BB/Vertex、PGO/IC 优化、寄存器分配、代码生成、反优化、安全点、GC 屏障及测试（含原生 unittest/GTest）时使用；使用 JIT-Bench 做 ArkSteed 性能测试、版本回归或与 V8 对比时也使用。
 compatibility: 需要 ets_runtime 源码及正常构建工具链；ARM64 跨架构测试需要 QEMU；源码对照需要可读取的 V8 源码。
 ---
 
@@ -18,14 +18,14 @@ ArkSteed 是基于 CFG 的 JIT：`Graph` 包含基本块 `BB`，基本块包含�
 |---|---|
 | 解释、只读分析或检视 | 阅读和分析源码，给出依据与结论；不修改文件，不执行格式化、构建或测试 |
 | 开发、优化、修复 | 完成第 3–6 步的局部实现、格式化、聚焦验证与实现报告 |
-| 仅构建或功能测试 | 不修改源码，按第 5 步执行请求的命令与配置 |
+| 仅构建、原生单测或功能测试 | 不修改源码，按第 5 步区分 unittest 与 JS/TS 用例，执行请求的命令与配置 |
 | JIT 性能测试、性能回归或跨引擎对比 | 读取并执行 [JIT-Bench 性能测试指南](references/jit-performance-tests.md)，只测量任务要求的范围，不套用功能测试 runner |
 | 提 PR、准备合入 | 整理变更与提交材料，不自动构建或测试；未要求全量功能测试时，不以未测试阻塞提 PR |
 | 用户明确要求全量功能测试 | 读取并执行[全量功能测试指南](references/full-functional-tests.md)，只运行用户要求的范围；当前配置失败后停止后续配置并报告 |
 
 ## 修改范围
 
-- ArkSteed 优化默认限于 `ecmascript/arksteed/**`，测试放在其 `test/` 下。
+- ArkSteed 优化默认限于 `ecmascript/arksteed/**`；JS/TS 功能用例放在 `test/`，原生 C++/GTest 单元测试放在 `unittests/`，两类测试分开维护。
 - 优化项对比报告和实现报告保存在仓库 `.agents/` 下，不扩大运行时代码的可修改范围。
 - 共享编译器、解释器和运行时代码用于对照语义与 ABI，不因复用方便而修改。
 - 只有局部 CFG、lowering、元数据或代码生成方案不足时，才考虑修改范围外的代码；修改前说明原因和影响。构建注册、优化必需的 PGO 采集/反馈链路补充，或确实共享的 ABI/运行时缺陷可以构成理由。
@@ -52,7 +52,7 @@ ArkSteed 是基于 CFG 的 JIT：`Graph` 包含基本块 `BB`，基本块包含�
 
 ```bash
 rg -n '<term>' ecmascript/arksteed
-rg -l '<term>' ecmascript/arksteed/test | sort
+rg -l '<term>' ecmascript/arksteed/test ecmascript/arksteed/unittests | sort
 rg -n '<exact-symbol>' ecmascript | grep -v '^ecmascript/arksteed/'
 git log -n 10 --oneline -- ecmascript/arksteed
 ```
@@ -139,7 +139,7 @@ git log -n 10 --oneline -- ecmascript/arksteed
 
 ### 5. 构建与聚焦验证
 
-先阅读 `ecmascript/arksteed/test/README.md`，按当前 runner 的接口和注解编写、选择测试。runner 默认构建并启用 ArkSteed，无需先重复单独构建。
+先区分测试类型：JS/TS 功能测试阅读 `ecmascript/arksteed/test/README.md`，按 runner 的接口和注解选择用例；原生 unittest 阅读 `ecmascript/arksteed/unittests/README.md` 与 `BUILD.gn`，使用现有 GTest/GN 目标。两种入口均负责构建所需依赖，无需先重复单独构建；只运行与任务相关的测试类型，不自动扩大为整个运行时的单测或全量功能测试。
 
 仅需构建 x64 Debug 时：
 
@@ -148,7 +148,24 @@ git log -n 10 --oneline -- ecmascript/arksteed
   --gn-args=ets_runtime_enable_ark_steed=true)
 ```
 
-开发阶段默认只构建和验证 **x64 Debug**，包括架构敏感改动。选择聚焦用例；`-I` 是相对测试根目录的路径，如 `jittest/createemptyarray_inline_allocation`：
+#### 原生 unittest
+
+只构建并运行 ArkSteed 原生单测及必要依赖：
+
+```bash
+(cd ../.. && python3 ark.py x64.debug arksteed_host_unittest \
+  --gn-args=ets_runtime_enable_ark_steed=true)
+```
+
+- `arksteed_host_unittest` 是 `ecmascript/arksteed/unittests/BUILD.gn` 中的分组，不包含其他模块或 JS/TS 用例。聚焦单个测试目标时，将分组名替换为对应的 `*Action`，例如 `ArkSteedRegisterAllocatorTestAction`。
+- 显式保留 `--gn-args=ets_runtime_enable_ark_steed=true`；当前默认关闭，目标不会自动开启，不为省略参数而修改 `ark.py` 或全局默认值。
+- 新增原生测试沿用 `host_unittest_action` 和 GTest，注册到该分组；由 GN/Ninja 管理源码依赖，不另写读取编译数据库或复用链接响应文件的专用脚本。
+- `*Action` 用于宿主机或已配置的 QEMU 执行；不带 `Action` 的目标是目标平台测试程序，不代表已部署或已在手机运行。手机端测试须另行核对设备侧分组、构建和部署入口；当前尚未接入 ArkSteed 手机端聚合分组。
+- unittest 验证编译器内部约束，不能代替 JS/TS 的真实机器码、对象初始化、GC 或反优化行为验证。按改动风险选择互补覆盖，并分别记录结果；构建或运行中断不算通过。
+
+#### JS/TS 功能测试
+
+开发阶段默认只构建和验证 **x64 Debug**，包括架构敏感改动。JS/TS runner 默认启用 ArkSteed。选择聚焦用例；`-I` 是相对测试根目录的路径，如 `jittest/createemptyarray_inline_allocation`：
 
 ```bash
 # Focused x64 debug validation
