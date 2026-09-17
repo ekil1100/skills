@@ -13,13 +13,11 @@
     },
     {
       "name": "like",
-      "skills": [
-        "./commit-push",
-        "./html-plan",
-        "./loop-review-fix",
-        "./update-claude",
-        "./xteink-font-bin"
-      ]
+      "skills": ["./commit-push", "./loop-review-fix"]
+    },
+    {
+      "name": "other",
+      "skills": ["./html-plan", "./update-claude", "./xteink-font-bin"]
     }
   ]
 }
