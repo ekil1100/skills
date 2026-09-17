@@ -1,10 +1,18 @@
-## Install all skills
+## 安装全部 Skills
 
 ```shell
 npx skills add ekil1100/skills -g
 ```
 
 ---
+
+**wiki-save** - 用 Obsidian CLI 保存讨论结论、总结与决策，遵循目标知识库规范，完成查重、定向写入和回读验证。
+
+```shell
+npx skills add https://github.com/ekil1100/skills --skill wiki-save -y -g
+```
+
+例如：“把刚才的结论保存到 Wiki；有相关页面就补充，保留依据和未解决问题。”
 
 **loop-review-fix** - review changes and fix it until no issue report.
 

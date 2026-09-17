@@ -13,7 +13,7 @@
     },
     {
       "name": "like",
-      "skills": ["./commit-push", "./loop-review-fix"]
+      "skills": ["./commit-push", "./loop-review-fix", "./wiki-save"]
     },
     {
       "name": "other",
