@@ -6,6 +6,7 @@
         "./squash-pr",
         "./oh-pr",
         "./d8-binary",
+        "./ark-cli",
         "./arksteed",
         "./ets-runtime-remote-build"
       ]

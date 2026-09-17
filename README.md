@@ -42,6 +42,12 @@ npx skills add https://github.com/ekil1100/skills --skill oh-pr -y -g
 npx skills add https://github.com/ekil1100/skills --skill d8-binary -y -g
 ```
 
+**ark-cli** - 使用 `ark` CLI 配置环境、构建 ETS Runtime、运行 JS/TS 和 PGO/AOT/JIT 流水线，包含调试、日志及安全清理指引。
+
+```shell
+npx skills add https://github.com/ekil1100/skills --skill ark-cli -y -g
+```
+
 **arksteed** - 开发、优化、调试和检视 ArkSteed JIT 编译器，包含源码对照、实现报告、按需功能测试及 JIT-Bench 性能测试。远端构建或测试配合 `ets-runtime-remote-build` 使用。
 
 ```shell

@@ -1,0 +1,23 @@
+{
+  "skill_name": "ark-cli",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "我在 /tmp/ark-demo 有 t.js，想用 ark 分别跑普通解释执行、JIT 和完整 AOT。只给命令方案，不要实际运行或改文件；说明各自会执行哪些阶段。",
+      "expected_output": "先说明在用例目录核对 ark env；普通模式使用 ark t.js all（abc→asm），JIT 使用 abc && jit，完整 AOT 使用 all --aot（abc→pgo→aot→asm）。不把单独 jit 说成会生成 abc，不添加无关清理或同步。",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "ark.toml 写着 arm64 release，但 ark env 显示 shell 的 x64 debug。我是用 agent 分几次 bash 调用执行的。想只为本次任务切到 /path/to/ohos-checkout 的 standalone arm64 release 并启用 ArkSteed 构建，别改 bashrc。只给安全方案，不要执行。",
+      "expected_output": "解释 shell 覆盖 TOML，使用同一次 shell 调用显式 export 绝对 OHOS_PATH、OHOS_REPO、OHOS_PLAT、OHOS_MODE，检查 ark env 后执行 ark build arksteed；不假定直接调用二进制的 env 切换或不同 bash 调用可以保留环境，不修改 bashrc，不自动同步。",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "只做命令审核，不执行：我准备在 standalone 下用 ark build ut 验证单测，然后 ark t.js jit --compiler-enable-jit-fort=true，最后 ark t.js rm 清掉这个用例的 AOT 产物。这几个命令能达到目标吗？",
+      "expected_output": "识别 standalone 的 build ut 不单独选择单测目标；任意 VM flag 不会自动透传，应检查 VM 支持并配置 compile.jit.args，先准备 abc；显式文件 rm 只删对应 ap/ai/an，不删 abc，不扩大为 ark rm 或 rm out。",
+      "files": []
+    }
+  ]
+}
