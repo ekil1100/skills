@@ -18,7 +18,7 @@ ArkSteed 是基于 CFG 的 JIT：`Graph` 包含基本块 `BB`，基本块包含�
 |---|---|
 | 解释、只读分析或检视 | 阅读和分析源码，给出依据与结论；不修改文件，不执行格式化、构建或测试 |
 | 开发、优化、修复 | 完成第 3–6 步的局部实现、格式化、聚焦验证与实现报告 |
-| 仅构建、原生单测或功能测试 | 不修改源码，按第 5 步区分 unittest 与 JS/TS 用例，执行请求的命令与配置 |
+| 仅构建或功能测试（含原生单测） | 不修改源码，按第 5 步选择 unittest、JS/TS 等测试入口，执行请求的命令与配置 |
 | JIT 性能测试、性能回归或跨引擎对比 | 读取并执行 [JIT-Bench 性能测试指南](references/jit-performance-tests.md)，只测量任务要求的范围，不套用功能测试 runner |
 | 提 PR、准备合入 | 整理变更与提交材料，不自动构建或测试；未要求全量功能测试时，不以未测试阻塞提 PR |
 | 用户明确要求全量功能测试 | 读取并执行[全量功能测试指南](references/full-functional-tests.md)，只运行用户要求的范围；当前配置失败后停止后续配置并报告 |
@@ -139,7 +139,9 @@ git log -n 10 --oneline -- ecmascript/arksteed
 
 ### 5. 构建与聚焦验证
 
-先区分测试类型：JS/TS 功能测试阅读 `ecmascript/arksteed/test/README.md`，按 runner 的接口和注解选择用例；原生 unittest 阅读 `ecmascript/arksteed/unittests/README.md` 与 `BUILD.gn`，使用现有 GTest/GN 目标。两种入口均负责构建所需依赖，无需先重复单独构建；只运行与任务相关的测试类型，不自动扩大为整个运行时的单测或全量功能测试。
+**功能测试包含原生 unittest、内部 JS/TS 和 external 用例；入口分开不代表 unittest 被排除。全量功能测试默认覆盖这三部分，用户明确限定子集时按指定范围执行。**
+
+按测试入口选择：内部 JS/TS 测试阅读 `ecmascript/arksteed/test/README.md`，按 runner 的接口和注解选择用例；原生 unittest 阅读 `ecmascript/arksteed/unittests/README.md` 与 `BUILD.gn`，使用现有 GTest/GN 目标。两种入口均负责构建所需依赖，无需先重复单独构建；只运行与任务相关的测试类型，不自动扩大为整个运行时的单测或全量功能测试。
 
 仅需构建 x64 Debug 时：
 
