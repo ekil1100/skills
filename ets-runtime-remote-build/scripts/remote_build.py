@@ -7,9 +7,10 @@ import json
 import os
 from pathlib import Path
 import shlex
+import shutil
+import socket
 import subprocess
 import sys
-import tempfile
 import threading
 import uuid
 
@@ -20,9 +21,7 @@ WORKER = Path(__file__).with_name('remote_ops.py')
 
 
 def save(directory, state):
-    temporary = directory / 'state.json.tmp'
-    temporary.write_text(json.dumps(state, ensure_ascii=True, indent=2) + '\n')
-    temporary.replace(directory / 'state.json')
+    ops.save_run(directory, state)
 
 
 def refs(root, head):
@@ -56,11 +55,16 @@ def refs(root, head):
     return result
 
 
-def local_root(value):
+def repository_root(value):
     root = Path(ops.decode(ops.git(Path(value), 'rev-parse', '--show-toplevel')).strip())
     home = Path.home().resolve()
     relative = root.relative_to(home).as_posix()
     ops.safe_path(home, relative)
+    return root, relative
+
+
+def local_root(value):
+    root, relative = repository_root(value)
     if root.name != 'ets_runtime' or root.resolve() != root:
         raise RuntimeError('Expected a non-symlink ets_runtime repository under HOME.')
     ops.validate_index(root)
@@ -77,23 +81,37 @@ class Remote:
 
     def request(self, action, **kwargs):
         request = {'action': action, 'relative': self.state['relative'],
-                   'token': self.token, **kwargs}
+                   'token': self.token, 'run_id': self.state['run_id'],
+                   'baseline': self.state['local']['head'], **kwargs}
         # Send the versioned worker directly, without generating or installing scripts.
         inner = 'exec python3 -c ' + shlex.quote(WORKER.read_text())
         argv = ['ssh', HOST, 'bash -lc ' + shlex.quote(inner)]
         data = json.dumps(request, ensure_ascii=True).encode()
-        with (self.directory / 'remote.log').open('ab') as log:
+        target = self.directory / 'logs' / 'remote.log'
+        if action == 'run':
+            target = self.directory / 'commands' / f'{kwargs["number"]:04d}' / 'logs' / 'command.log'
+        capture_errors = []
+        with target.open('ab', buffering=0) as log:
             process = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                        stderr=subprocess.PIPE)
             def drain():
-                while True:
-                    chunk = process.stderr.read1(8192)
-                    if not chunk:
-                        break
-                    sys.stderr.buffer.write(chunk)
-                    sys.stderr.buffer.flush()
-                    log.write(chunk)
-                    log.flush()
+                try:
+                    while True:
+                        chunk = process.stderr.read1(8192)
+                        if not chunk:
+                            break
+                        if not capture_errors:
+                            try:
+                                ops.write_all(log, chunk)
+                            except OSError as exc:
+                                capture_errors.append('Local remote-output log write failed: ' + str(exc))
+                        try:
+                            sys.stderr.buffer.write(chunk)
+                            sys.stderr.buffer.flush()
+                        except (BrokenPipeError, OSError):
+                            pass
+                except Exception as exc:
+                    capture_errors.append('Remote output capture failed: ' + str(exc))
             thread = threading.Thread(target=drain, daemon=True)
             thread.start()
             try:
@@ -114,12 +132,20 @@ class Remote:
         if code == 255 or (code and action == 'run'):
             self.uncertain = True
         if code:
-            raise RuntimeError(f'Remote {action} failed ({code}); see {self.directory / "remote.log"}')
+            raise RuntimeError(f'Remote {action} failed ({code}); see {target}')
         try:
-            return json.loads(output)
+            response = json.loads(output)
         except (ValueError, UnicodeError):
             self.uncertain = True
             raise RuntimeError('Invalid remote response; inspect the remote task before retrying.')
+        if capture_errors:
+            if action == 'run':
+                response['recording_error'] = '; '.join(
+                    [response['recording_error']] + capture_errors
+                    if response.get('recording_error') else capture_errors)
+            else:
+                raise RuntimeError('; '.join(capture_errors))
+        return response
 
     @contextmanager
     def locked(self):
@@ -129,6 +155,7 @@ class Remote:
             acquired = True
             self.state['remote_root'] = location['root']
             self.state['remote_lock'] = location['lock']
+            self.state['remote_history'] = location['remote_history']
             self.state['lock_token'] = self.token
             save(self.directory, self.state)
             yield self
@@ -163,14 +190,18 @@ def mirror(directory, state, dry=True):
     for name in sorted(ops.PROTECTED):
         argv.extend(['--exclude=/' + name, '--exclude=/' + name + '/***'])
     argv.extend(['--', state['root'] + '/', HOST + ':' + state['remote_root'] + '/'])
-    result = subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    with (directory / 'rsync.log').open('ab') as log:
-        log.write(('DRY RUN\n' if dry else 'APPLY\n').encode() + result.stdout + result.stderr)
-    if result.stderr:
-        sys.stderr.buffer.write(result.stderr)
+    label = ('preview-' if dry else 'apply-') + uuid.uuid4().hex[:8]
+    output_path = directory / 'logs' / (label + '.stdout.log')
+    error_path = directory / 'logs' / (label + '.stderr.log')
+    # Both streams have durable file descriptors before rsync starts, including on interruption.
+    with output_path.open('xb') as output, error_path.open('xb') as errors:
+        result = subprocess.run(argv, stdout=output, stderr=errors)
+    error = error_path.read_bytes()
+    if error:
+        sys.stderr.buffer.write(error)
     if result.returncode:
-        raise RuntimeError(f'Rsync failed ({result.returncode}); see {directory / "rsync.log"}')
-    return ops.decode(result.stdout)
+        raise RuntimeError(f'Rsync failed ({result.returncode}); see {error_path}')
+    return ops.decode(output_path.read_bytes())
 
 
 def unchanged(root, expected):
@@ -186,16 +217,19 @@ def remote_snapshot(remote, state, check_ignored=True):
 
 
 def prepare(args):
-    root, relative = local_root(args.repo)
-    local = ops.snapshot(root)
-    cache = Path.home() / '.cache' / 'ets-runtime-remote-build'
-    cache.mkdir(parents=True, exist_ok=True)
-    directory = Path(tempfile.mkdtemp(prefix='session-', dir=cache))
+    root, relative = repository_root(args.repo)
+    baseline = ops.info(root)
+    directory = ops.create_history(relative, baseline['head'])
     print('Session: ' + str(directory), flush=True)
-    state = {'version': 1, 'phase': 'preparing', 'root': str(root), 'relative': relative,
-             'local': local, 'stashes': [], 'commands': [], 'ark_sync': 'skipped'}
+    state = {'version': 2, 'kind': 'remote-session', 'run_id': directory.name,
+             'phase': 'preparing', 'root': str(root), 'relative': relative,
+             'host': socket.gethostname(), 'started_at': ops.timestamp(),
+             'source': baseline, 'stashes': [], 'commands': [], 'ark_sync': 'skipped'}
     save(directory, state)
     try:
+        local_root(root)
+        state['local'] = ops.snapshot(root)
+        save(directory, state)
         with Remote(directory, state).locked() as remote:
             state['original'] = remote.request('inspect')
             save(directory, state)
@@ -217,9 +251,9 @@ def prepare(args):
             state['phase'] = 'prepared'
             save(directory, state)
         print(state['preview'] or 'No source differences.')
-        print('Review preview.txt and state.json, then invoke apply with this session.')
-    except BaseException:
-        state['phase'] = 'failed'
+        print('Review preview.txt and run.json, then invoke apply with this session.')
+    except BaseException as exc:
+        state.update(phase='failed', error=str(exc) or 'Interrupted', ended_at=ops.timestamp())
         save(directory, state)
         (directory / 'files.nul').unlink(missing_ok=True)
         raise
@@ -267,26 +301,50 @@ def run(directory, state, remote, args):
     unchanged(root, state['local'])
     if remote_snapshot(remote, state, check_ignored=False) != state['remote_applied']:
         raise RuntimeError('Remote source changed after apply; prepare and review again.')
-    record = {'command': args.command, 'qemu': args.qemu, 'exit_code': None}
+    number = len(state['commands']) + 1
+    command_dir = directory / 'commands' / f'{number:04d}'
+    command_dir.mkdir(parents=True, mode=0o700)
+    (command_dir / 'logs').mkdir()
+    (command_dir / 'results').mkdir()
+    record = {'version': 2, 'number': number, 'run_id': state['run_id'],
+              'command': args.command, 'qemu': args.qemu, 'exit_code': None,
+              'phase': 'dispatching', 'started_at': ops.timestamp(),
+              'root': state['remote_root'], 'host': HOST,
+              'remote_history': state['remote_history'] + f'/commands/{number:04d}'}
     state['commands'].append(record)
     state['phase'] = 'running'
     save(directory, state)
-    result = remote.request('run', command=args.command, qemu=args.qemu,
-                            expected=state['remote_applied'])
-    record.update(result)
+    save(command_dir, record)
+    try:
+        result = remote.request('run', command=args.command, qemu=args.qemu,
+                                number=number, expected=state['remote_applied'])
+        phase = 'passed' if result['exit_code'] == 0 else 'failed'
+        record.update(result, phase='recording-failed' if result.get('recording_error') else phase)
+        if result.get('recording_error'):
+            record['error'] = result['recording_error']
+    except BaseException as exc:
+        record.update(phase='unknown', error=str(exc) or 'Interrupted; inspect remote task state.')
+        raise
+    finally:
+        save(command_dir, record)
+        save(directory, state)
     state['phase'] = 'applied'
+    state['ended_at'] = ops.timestamp()
     save(directory, state)
+    print('Remote command history: ' + record['remote_history'])
     print('Command exit code: ' + str(result['exit_code']))
-    return result['exit_code'] if result['exit_code'] >= 0 else 128 - result['exit_code']
+    if result.get('recording_error'):
+        print('History recording failed: ' + result['recording_error'], file=sys.stderr)
+    return shell_code(result['exit_code']) or (1 if result.get('recording_error') else 0)
 
 
 def existing(args):
     directory = Path(args.session).resolve()
     with (directory / 'session.lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        state = json.loads((directory / 'state.json').read_text())
-        if state.get('version') != 1:
-            raise RuntimeError('Unsupported session format.')
+        state = json.loads((directory / 'run.json').read_text())
+        if state.get('version') != 2 or state.get('kind') != 'remote-session':
+            raise RuntimeError('Unsupported session format; archive old sessions and prepare a new run.')
         try:
             expected_phase = 'prepared' if args.action == 'apply' else 'applied'
             if state['phase'] != expected_phase:
@@ -298,11 +356,53 @@ def existing(args):
                     apply(directory, state, remote)
                     return 0
                 return run(directory, state, remote, args)
-        except BaseException:
-            state['phase'] = 'failed'
+        except BaseException as exc:
+            state.update(phase='failed', error=str(exc) or 'Interrupted', ended_at=ops.timestamp())
             save(directory, state)
             (directory / 'files.nul').unlink(missing_ok=True)
             raise
+
+
+def shell_code(code):
+    return code if code >= 0 else 128 - code
+
+
+def archive_history():
+    base = Path.home() / '.cache' / 'ets-runtime-remote-build'
+    archived = set()
+    for manifest in ops.history_root().glob('*/*/run.json'):
+        state = json.loads(manifest.read_text())
+        if state.get('legacy_source'):
+            archived.add(state['legacy_source'])
+    for source in sorted(base.glob('session-*')):
+        if str(source) in archived or source.is_symlink() or not (source / 'state.json').is_file():
+            continue
+        with (source / 'session.lock').open('a') as lock:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                print('Skipped active legacy session: ' + str(source))
+                continue
+            old = json.loads((source / 'state.json').read_text())
+            if old.get('phase') not in ('applied', 'failed'):
+                print('Skipped unfinished legacy session: ' + str(source))
+                continue
+            if any(path.is_symlink() for path in source.rglob('*')):
+                raise RuntimeError('Refusing legacy session containing symlinks: ' + str(source))
+            directory = ops.create_history(old['relative'], old['local']['head'])
+            shutil.copytree(source, directory / 'legacy')
+            for original in source.rglob('*'):
+                if original.is_file():
+                    copy = directory / 'legacy' / original.relative_to(source)
+                    if ops.hashlib.sha256(original.read_bytes()).digest() != ops.hashlib.sha256(copy.read_bytes()).digest():
+                        raise RuntimeError('Legacy copy verification failed; source is preserved.')
+            state = {'version': 2, 'kind': 'legacy-archive', 'run_id': directory.name,
+                     'phase': old['phase'], 'root': old['root'], 'source': old['local'],
+                     'started_at': ops.timestamp(), 'ended_at': ops.timestamp(),
+                     'legacy_source': str(source), 'host': socket.gethostname()}
+            save(directory, state)
+            print('Archived: ' + str(source) + ' -> ' + str(directory))
+    return 0
 
 
 def main():
@@ -310,17 +410,20 @@ def main():
     subs = parser.add_subparsers(dest='action', required=True)
     prep = subs.add_parser('prepare', help='Stash/align remote source and produce a reviewable preview')
     prep.add_argument('--repo', required=True)
+    subs.add_parser('archive-history', help='Copy completed legacy cache sessions into verified persistent archives')
     for action in ('apply', 'run'):
         sub = subs.add_parser(action)
         sub.add_argument('--session', required=True)
         if action == 'run':
-            sub.add_argument('--command', required=True, help='Explicit shell command from the user/development skill')
+            sub.add_argument('--command', required=True, help='Explicit build/test shell command selected for this task')
             sub.add_argument('--qemu', action='store_true')
     args = parser.parse_args()
     try:
         if args.action == 'prepare':
             prepare(args)
             return 0
+        if args.action == 'archive-history':
+            return archive_history()
         return existing(args)
     except (Exception, KeyboardInterrupt) as exc:
         print('Stopped: ' + (str(exc) or 'interrupted'), file=sys.stderr)

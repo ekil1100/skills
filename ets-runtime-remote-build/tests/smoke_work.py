@@ -8,7 +8,7 @@ import subprocess
 import sys
 import tempfile
 
-PREFIX = '.cache/ets-runtime-remote-build-smoke'
+PREFIX = '.local/state/ark-runtime/smoke-fixtures'
 
 
 def check(condition, message):
@@ -60,9 +60,9 @@ def setup(root, remote=False):
 def remote_action(request):
     relative = Path(request['relative'])
     check(not relative.is_absolute() and '..' not in relative.parts, 'Unsafe fixture path.')
-    check(relative.parts[:2] == ('.cache', 'ets-runtime-remote-build-smoke')
-          and len(relative.parts) == 4 and relative.name == 'ets_runtime'
-          and relative.parts[2].startswith('smoke-'), 'Unexpected fixture path.')
+    check(relative.parts[:4] == ('.local', 'state', 'ark-runtime', 'smoke-fixtures')
+          and len(relative.parts) == 6 and relative.name == 'ets_runtime'
+          and relative.parts[4].startswith('smoke-'), 'Unexpected fixture path.')
     root = Path.home() / relative
     check(root.resolve() == root, 'Symlink fixture paths are not supported.')
     if request['action'] == 'setup':
@@ -74,7 +74,6 @@ def remote_action(request):
         'space and\nnewline.txt': 'new source\n',
         'staged-new.txt': 'staged source\n',
         'out/preserved.bin': 'remote artifact\n',
-        'out/smoke-result.txt': 'smoke-ok\n',
         '.pi/settings.json': 'remote metadata\n',
         '.git/smoke-marker': 'remote git metadata\n',
     }.items():
@@ -86,9 +85,16 @@ def remote_action(request):
     check(git(root, 'show', saved + ':source.txt') == 'remote work to stash', 'Stash lost tracked work.')
     check(git(root, 'show', saved + '^3:remote notes.txt') == 'remote untracked work',
           'Stash lost untracked work.')
+    directory = Path(request['command_dir'])
+    check((directory / 'results/smoke-result.txt').read_text() == 'smoke-ok\n', 'Missing durable result.')
+    record = json.loads((directory / 'run.json').read_text())
+    check(record['exit_code'] == 0, 'Missing durable command status.')
+    check('Remote smoke command succeeded.' in (directory / 'logs/command.log').read_text(),
+          'Missing durable command log.')
+    check((directory / 'summary.md').is_file(), 'Missing durable summary.')
     return {'root': str(root), 'head': git(root, 'rev-parse', 'HEAD'),
             'stash': saved, 'status': git(root, 'status', '--short'),
-            'artifact': str(root / 'out/smoke-result.txt')}
+            'artifact': str(directory / 'results/smoke-result.txt')}
 
 
 def remote(action, relative, **fields):
@@ -139,7 +145,7 @@ def smoke():
                 if line.startswith('Session: ')]
     check(len(sessions) == 1, 'Missing session path.')
     session = Path(sessions[0])
-    state = json.loads((session / 'state.json').read_text())
+    state = json.loads((session / 'run.json').read_text())
     # Review this deterministic fixture's exact transfer/delete set, not just counts.
     reviewed = {}
     for row in state['preview'].splitlines():
@@ -158,17 +164,18 @@ def smoke():
     invoke(runner, 'apply', '--session', str(session))
     invoke(runner, 'run', '--session', str(session), '--command',
            'test "$(cat source.txt)" = "local updated source" && '
-           'mkdir -p out && printf "smoke-ok\\n" > out/smoke-result.txt && '
+           'printf "smoke-ok\\n" > "$ARK_RESULTS_DIR/smoke-result.txt" && '
            'printf "Remote smoke command succeeded.\\n"')
     invoke(runner, 'run', '--session', str(session), '--command', 'exit 7', expected=7)
-    final = json.loads((session / 'state.json').read_text())
+    final = json.loads((session / 'run.json').read_text())
     check(final['phase'] == 'applied', 'Command failure invalidated the source mirror.')
     check([entry['exit_code'] for entry in final['commands']] == [0, 7], 'Wrong command results.')
     check(final['ark_sync'] == 'skipped', 'Unexpected automatic dependency sync.')
-    verification = remote('verify', relative, head=local['head'], stash=saved)
+    verification = remote('verify', relative, head=local['head'], stash=saved,
+                          command_dir=final['commands'][0]['remote_command_dir'])
     report = {'result': 'passed', 'local_fixture': str(root), 'session': str(session),
               **verification, 'command_exit_codes': [0, 7], 'ark_sync': 'skipped'}
-    (fixture / 'report.json').write_text(json.dumps(report, indent=2) + '\n')
+    (session / 'results/smoke-report.json').write_text(json.dumps(report, indent=2) + '\n')
     print(json.dumps(report, indent=2), flush=True)
     print('Smoke passed. Isolated fixtures, stash and logs are retained for inspection.', flush=True)
 

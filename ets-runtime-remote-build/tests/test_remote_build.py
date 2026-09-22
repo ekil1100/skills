@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import time
 import unittest
 
 
@@ -50,6 +51,7 @@ class RemoteBuildIntegrationTests(unittest.TestCase):
             "HOME": str(self.home),
             "XDG_CONFIG_HOME": str(self.home / ".config"),
             "XDG_CACHE_HOME": str(self.home / ".cache"),
+            "XDG_STATE_HOME": str(self.home / ".local" / "state"),
             "PATH": str(self.bin) + os.pathsep + os.environ.get("PATH", os.defpath),
             "GIT_CONFIG_NOSYSTEM": "1",
             "GIT_CONFIG_GLOBAL": os.devnull,
@@ -91,10 +93,14 @@ class RemoteBuildIntegrationTests(unittest.TestCase):
             os.environ['HOME'] = os.environ['FAKE_REMOTE_HOME']
             os.environ['XDG_CONFIG_HOME'] = os.environ['HOME'] + '/.config'
             os.environ['XDG_CACHE_HOME'] = os.environ['HOME'] + '/.cache'
+            os.environ['XDG_STATE_HOME'] = os.environ['HOME'] + '/.local/state'
             os.chdir(os.environ['HOME'])
-            if command[:2] == ['bash', '-lc'] and os.environ.get('FAKE_SSH_BREAK_RUN'):
+            if command[:2] == ['bash', '-lc'] and (
+                    os.environ.get('FAKE_SSH_BREAK_RUN') or os.environ.get('FAKE_SSH_DROP_RESPONSE')):
                 data = sys.stdin.buffer.read()
                 if json.loads(data)['action'] == 'run':
+                    if os.environ.get('FAKE_SSH_DROP_RESPONSE'):
+                        subprocess.run(command, input=data, stdout=subprocess.DEVNULL)
                     sys.exit(255)
                 sys.exit(subprocess.run(command, input=data).returncode)
             os.execvpe(command[0], command, os.environ)
@@ -192,7 +198,7 @@ class RemoteBuildIntegrationTests(unittest.TestCase):
 
     @staticmethod
     def state(session):
-        return json.loads((session / "state.json").read_text())
+        return json.loads((session / "run.json").read_text())
 
     @staticmethod
     def records(path):
@@ -221,13 +227,142 @@ class RemoteBuildIntegrationTests(unittest.TestCase):
         self.assertFalse((session / "files.nul").exists())
         self.assert_run_blocked(session)
 
+    def test_persistent_layout_and_command_histories_do_not_overwrite(self):
+        session = self.prepare()
+        self.assertTrue(session.is_relative_to(self.home / '.local/state/ark-runtime/runs'))
+        self.assertEqual(self.state(session)['run_id'], session.name)
+        self.assertTrue((session / 'summary.md').is_file())
+        self.assertTrue((session / 'logs').is_dir())
+        self.assertTrue((session / 'results').is_dir())
+        remote_dir = Path(self.state(session)['remote_history'])
+        self.assertEqual(remote_dir.name, session.name)
+        self.assertTrue(remote_dir.is_relative_to(self.remote_home / '.local/state/ark-runtime/runs'))
+        self.apply(session)
+        for value in ('first', 'second'):
+            result = self.cli('run', session=session, command=(
+                f'printf "{value}\\n"; printf "{value}" > "$ARK_RESULTS_DIR/value.txt"; '
+                'printf "%s" "$TMPDIR" > "$ARK_RESULTS_DIR/tmp-path.txt"'))
+            self.assertEqual(result.returncode, 0, self.diagnostic(result))
+        state = self.state(session)
+        for index, value in enumerate(('first', 'second'), 1):
+            local_dir = session / 'commands' / f'{index:04d}'
+            saved = Path(state['commands'][index - 1]['remote_command_dir'])
+            self.assertEqual((saved / 'results/value.txt').read_text(), value)
+            self.assertEqual((saved / 'results/tmp-path.txt').read_text(), str(saved / 'results/tmp'))
+            self.assertEqual(json.loads((saved / 'run.json').read_text())['exit_code'], 0)
+            self.assertIn(value, (saved / 'logs/command.log').read_text())
+            self.assertIn(value, (local_dir / 'logs/command.log').read_text())
+            self.assertTrue((saved / 'summary.md').is_file())
+        self.assertNotEqual(state['commands'][0]['remote_command_dir'], state['commands'][1]['remote_command_dir'])
+        self.assertFalse((self.home / '.cache/ets-runtime-remote-build').exists())
+
+    def test_remote_results_survive_lost_ssh_response(self):
+        session = self.prepare()
+        self.apply(session)
+        self.env['FAKE_SSH_DROP_RESPONSE'] = '1'
+        result = self.cli('run', session=session, command=(
+            'printf "durable-before-disconnect\\n"; '
+            'printf "saved" > "$ARK_RESULTS_DIR/result.txt"; exit 7'))
+        self.assertNotEqual(result.returncode, 0, self.diagnostic(result))
+        self.assertEqual(self.state(session)['phase'], 'failed')
+        self.assertEqual(self.state(session)['commands'][0]['phase'], 'unknown')
+        saved = Path(self.state(session)['remote_history']) / 'commands/0001'
+        self.assertEqual((saved / 'results/result.txt').read_text(), 'saved')
+        self.assertIn('durable-before-disconnect', (saved / 'logs/command.log').read_text())
+        self.assertEqual(json.loads((saved / 'run.json').read_text())['exit_code'], 7)
+        self.assertTrue(Path(self.state(session)['remote_lock']).exists())
+
+    def test_prepare_uses_custom_local_state_root(self):
+        self.env['XDG_STATE_HOME'] = str(self.home / 'custom state')
+        session = self.prepare()
+        self.assertTrue(session.is_relative_to(self.home / 'custom state/ark-runtime/runs'))
+        remote = Path(self.state(session)['remote_history'])
+        self.assertTrue(remote.is_relative_to(self.remote_home / '.local/state/ark-runtime/runs'))
+        self.assertEqual(remote.name, session.name)
+
+    def test_local_execution_subcommand_is_not_available(self):
+        result = self.invoke([sys.executable, RUNNER, 'record', '--repo', self.local,
+                              '--command', 'touch must-not-run'])
+        self.assertEqual(result.returncode, 2)
+        self.assertIn('invalid choice', result.stderr)
+        self.assertFalse((self.local / 'must-not-run').exists())
+        self.assertEqual(self.records(self.ssh_log), [])
+
+    def test_remote_command_log_is_durable_before_process_exits(self):
+        session = self.prepare()
+        self.apply(session)
+        directory = Path(self.state(session)['remote_history']) / 'commands/0001'
+        release = self.remote_home / 'release-command'
+        text = ('printf "written-before-exit\\n"; '
+                f'while test ! -f {shlex.quote(str(release))}; do sleep 0.02; done')
+        process = subprocess.Popen([sys.executable, '-B', str(RUNNER), 'run',
+                                    '--session', str(session), '--command', text],
+                                   cwd=self.home, env=self.env, text=True,
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        try:
+            logfile = directory / 'logs/command.log'
+            for _ in range(600):
+                if logfile.exists() and 'written-before-exit' in logfile.read_text():
+                    break
+                time.sleep(0.01)
+            self.assertIn('written-before-exit', logfile.read_text())
+            self.assertIsNone(process.poll())
+            self.assertEqual(self.state(directory)['phase'], 'running')
+            release.write_text('finish')
+            stdout, stderr = process.communicate(timeout=10)
+            self.assertEqual(process.returncode, 0, stdout + stderr)
+            self.assertEqual(self.state(directory)['phase'], 'passed')
+        finally:
+            release.touch()
+            if process.poll() is None:
+                process.communicate(timeout=10)
+            process.stdout.close()
+            process.stderr.close()
+
+    def test_checkout_ids_distinguish_same_name_and_commit(self):
+        other = self.home / 'other/ets_runtime'
+        other_remote = self.remote_home / 'other/ets_runtime'
+        for root in (other, other_remote):
+            root.parent.mkdir()
+            self.checked([TOOLS['git'], 'clone', '--no-local', str(self.local), str(root)])
+        first = self.cli('prepare')
+        second = self.invoke([sys.executable, RUNNER, 'prepare', '--repo', other])
+        self.assertEqual(first.returncode, 0, self.diagnostic(first))
+        self.assertEqual(second.returncode, 0, self.diagnostic(second))
+        paths = [Path(next(line[9:] for line in result.stdout.splitlines() if line.startswith('Session: ')))
+                 for result in (first, second)]
+        self.assertNotEqual(paths[0].parent, paths[1].parent)
+
+    def test_legacy_archive_copies_verified_history_without_deleting_source(self):
+        old = self.home / '.cache/ets-runtime-remote-build/session-old'
+        old.mkdir(parents=True)
+        content = {'version': 1, 'phase': 'applied', 'relative': self.relative.as_posix(),
+                   'root': str(self.local), 'local': {'head': self.head}}
+        (old / 'state.json').write_text(json.dumps(content))
+        (old / 'remote.log').write_text('old evidence\n')
+        active = old.with_name('session-running')
+        active.mkdir()
+        (active / 'state.json').write_text(json.dumps(dict(content, phase='running')))
+        result = self.invoke([sys.executable, RUNNER, 'archive-history'])
+        self.assertEqual(result.returncode, 0, self.diagnostic(result))
+        self.assertIn('Skipped unfinished legacy session', result.stdout)
+        roots = list((self.home / '.local/state/ark-runtime/runs').glob('*/*/run.json'))
+        self.assertEqual(len(roots), 1)
+        archived = roots[0].parent
+        self.assertEqual(self.state(archived)['legacy_source'], str(old))
+        self.assertEqual((archived / 'legacy/remote.log').read_text(), 'old evidence\n')
+        self.assertEqual((old / 'remote.log').read_text(), 'old evidence\n')
+        again = self.invoke([sys.executable, RUNNER, 'archive-history'])
+        self.assertEqual(again.returncode, 0, self.diagnostic(again))
+        self.assertNotIn('Archived:', again.stdout)
+
     def test_prepare_accepts_real_rsync_supported_options(self):
         self.checked([TOOLS["rsync"], "--protect-args", "--version"])
         self.prepare()
 
     def test_worker_inspect_accepts_real_rsync_supported_options(self):
         env = dict(self.env, HOME=str(self.remote_home))
-        request = {"relative": self.relative.as_posix(), "token": "test-owner"}
+        request = {"relative": self.relative.as_posix(), "token": "test-owner", "run_id": "worker-probe"}
 
         def worker(action):
             return self.invoke([sys.executable, "-B", WORKER],
@@ -311,9 +446,10 @@ class RemoteBuildIntegrationTests(unittest.TestCase):
         self.assertEqual(self.git(self.local, "ls-files", "--stage", "-z"), original_index)
         self.assertEqual(self.git(self.local, "status", "--porcelain=v1", "-z"), original_status)
         result = self.cli("run", session=session,
-                          command="ark build && printf 'built\\n' > out/result.txt")
+                          command="ark build && printf 'built\\n' > \"$ARK_RESULTS_DIR/result.txt\"")
         self.assertEqual(result.returncode, 0, self.diagnostic(result))
-        self.assertEqual((self.remote / "out/result.txt").read_text(), "built\n")
+        command_dir = Path(self.state(session)['commands'][0]['remote_command_dir'])
+        self.assertEqual((command_dir / 'results/result.txt').read_text(), "built\n")
         self.assertEqual(self.records(self.ark_log), [
             {"args": ["build"], "cwd": str(self.remote), "home": str(self.remote_home)}])
         self.assertTrue(any(call[:2] == ["rsync", "--server"]
@@ -340,7 +476,7 @@ class RemoteBuildIntegrationTests(unittest.TestCase):
         self.assertNotEqual(saved, older)
         self.assertEqual(stash["before"]["branch"], "master")
         self.assertEqual(stash["before"]["head"], self.head)
-        self.assertIn("Saved stash (not restored)", (session / "remote.log").read_text())
+        self.assertIn("Saved stash (not restored)", (session / "logs/remote.log").read_text())
         self.assertEqual(self.git(self.remote, "show", saved + ":source.txt"), "remote unstaged work\n")
         self.assertEqual(self.git(self.remote, "show", saved + "^2:source.txt"), "remote staged work\n")
         self.assertEqual(self.git(self.remote, "show", saved + "^3:remote new\nfile.txt"),
@@ -373,7 +509,7 @@ class RemoteBuildIntegrationTests(unittest.TestCase):
         self.assertEqual((self.remote / "source.txt").read_text(), "baseline\n")
         self.assertFalse((self.remote / "remote-untracked.txt").exists())
         self.assertEqual((self.remote / "collision.txt").read_text(), "ignored destination\n")
-        self.assertIn(saved, (session / "remote.log").read_text())
+        self.assertIn(saved, (session / "logs/remote.log").read_text())
         self.assertFalse(Path(state["remote_lock"]).exists())
         self.assert_run_blocked(session)
 
@@ -547,7 +683,8 @@ class RemoteBuildIntegrationTests(unittest.TestCase):
     def test_remote_lock_blocks_prepare_without_stashing(self):
         self.put(self.remote, 'source.txt', 'concurrent work\n')
         env = dict(self.env, HOME=str(self.remote_home))
-        request = {'relative': self.relative.as_posix(), 'token': 'other-owner', 'action': 'lock'}
+        request = {'relative': self.relative.as_posix(), 'token': 'other-owner',
+                   'action': 'lock', 'run_id': 'lock-probe'}
         locked = self.invoke([sys.executable, '-B', WORKER], data=json.dumps(request), env=env)
         self.assertEqual(locked.returncode, 0, self.diagnostic(locked))
         location = json.loads(locked.stdout)['lock']
@@ -676,7 +813,7 @@ class RemoteBuildIntegrationTests(unittest.TestCase):
         self.apply(session)
         result = self.cli("run", session=session, command="ark build fail")
         self.assertEqual(result.returncode, 23, self.diagnostic(result))
-        self.assertIn("Fake ark: build fail", (session / "remote.log").read_text())
+        self.assertIn("Fake ark: build fail", (session / "commands/0001/logs/command.log").read_text())
         state = self.state(session)
         self.assertEqual(state["phase"], "applied")
         self.assertEqual(state["ark_sync"], "skipped")
