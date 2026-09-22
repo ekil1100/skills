@@ -1,0 +1,38 @@
+test_interrupt_cleans_up_after_command_leader_exits (test_history.HistoryFailureTests.test_interrupt_cleans_up_after_command_leader_exits) ... FAIL
+test_interrupt_kills_descendants_ignoring_termination (test_history.HistoryFailureTests.test_interrupt_kills_descendants_ignoring_termination) ... FAIL
+test_interrupt_waits_for_descendants_and_preserves_cleanup_log (test_history.HistoryFailureTests.test_interrupt_waits_for_descendants_and_preserves_cleanup_log) ... FAIL
+
+======================================================================
+FAIL: test_interrupt_cleans_up_after_command_leader_exits (test_history.HistoryFailureTests.test_interrupt_cleans_up_after_command_leader_exits)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/like/workspace/skills/ets-runtime-remote-build/tests/test_history.py", line 109, in test_interrupt_cleans_up_after_command_leader_exits
+    self.check_interrupt_cleanup(leader_exits=True)
+  File "/home/like/workspace/skills/ets-runtime-remote-build/tests/test_history.py", line 84, in check_interrupt_cleanup
+    self.assertFalse(running(child_pid), 'Interrupted command left a live descendant')
+AssertionError: True is not false : Interrupted command left a live descendant
+
+======================================================================
+FAIL: test_interrupt_kills_descendants_ignoring_termination (test_history.HistoryFailureTests.test_interrupt_kills_descendants_ignoring_termination)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/like/workspace/skills/ets-runtime-remote-build/tests/test_history.py", line 106, in test_interrupt_kills_descendants_ignoring_termination
+    self.check_interrupt_cleanup(ignore_term=True)
+  File "/home/like/workspace/skills/ets-runtime-remote-build/tests/test_history.py", line 84, in check_interrupt_cleanup
+    self.assertFalse(running(child_pid), 'Interrupted command left a live descendant')
+AssertionError: True is not false : Interrupted command left a live descendant
+
+======================================================================
+FAIL: test_interrupt_waits_for_descendants_and_preserves_cleanup_log (test_history.HistoryFailureTests.test_interrupt_waits_for_descendants_and_preserves_cleanup_log)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/like/workspace/skills/ets-runtime-remote-build/tests/test_history.py", line 103, in test_interrupt_waits_for_descendants_and_preserves_cleanup_log
+    self.check_interrupt_cleanup()
+  File "/home/like/workspace/skills/ets-runtime-remote-build/tests/test_history.py", line 84, in check_interrupt_cleanup
+    self.assertFalse(running(child_pid), 'Interrupted command left a live descendant')
+AssertionError: True is not false : Interrupted command left a live descendant
+
+----------------------------------------------------------------------
+Ran 3 tests in 0.937s
+
+FAILED (failures=3)

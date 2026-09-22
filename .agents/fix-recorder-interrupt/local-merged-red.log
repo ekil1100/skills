@@ -1,0 +1,16 @@
+test_interrupt_finishes_with_an_unread_merged_display_pipe (test_run_with_history.DevelopmentHistoryTests.test_interrupt_finishes_with_an_unread_merged_display_pipe) ... FAIL
+
+======================================================================
+FAIL: test_interrupt_finishes_with_an_unread_merged_display_pipe (test_run_with_history.DevelopmentHistoryTests.test_interrupt_finishes_with_an_unread_merged_display_pipe)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/like/workspace/skills/arksteed/tests/test_run_with_history.py", line 203, in test_interrupt_finishes_with_an_unread_merged_display_pipe
+    self.check_interrupt_cleanup(blocked_display=True, merge_output=True)
+  File "/home/like/workspace/skills/arksteed/tests/test_run_with_history.py", line 168, in check_interrupt_cleanup
+    self.assertIsNotNone(process.poll(), 'Cancellation blocked on an unread display pipe')
+AssertionError: unexpectedly None : Cancellation blocked on an unread display pipe
+
+----------------------------------------------------------------------
+Ran 1 test in 9.271s
+
+FAILED (failures=1)
