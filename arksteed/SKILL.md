@@ -12,12 +12,12 @@ ArkSteed 是基于 CFG 的 JIT：`Graph` 包含基本块 `BB`，基本块包含�
 
 ## 任务分流
 
-所有模式都先完成流程第 1、2 步的定位、源码阅读与优化项对比报告，再按任务授权继续：
+按任务选择入口。实现分析、开发和语义检视执行第 1、2 步的定位、三方源码阅读与对比报告；仅构建、测试或提 PR 直接进入对应流程，不要求三方对比或新建优化项报告：
 
 | 任务模式 | 执行范围 |
 |---|---|
-| 解释、只读分析或检视 | 阅读和分析源码，给出依据与结论；不修改文件，不执行格式化、构建或测试 |
-| 开发、优化、修复 | 完成第 3–6 步的局部实现、格式化、聚焦验证与实现报告 |
+| 解释、只读分析或检视 | 涉及实现分析或语义检视时完成第 1、2 步；一般使用说明直接查阅相关文档。不修改文件，不执行格式化、构建或测试 |
+| 开发、优化、修复 | 完成第 1、2 步后，执行第 3–6 步的局部实现、格式化、聚焦验证与实现报告 |
 | 仅构建或功能测试（含原生单测） | 不修改源码，按第 5 步选择 unittest、JS/TS 等测试入口，执行请求的命令与配置 |
 | JIT 性能测试、性能回归或跨引擎对比 | 读取并执行 [JIT-Bench 性能测试指南](references/jit-performance-tests.md)，只测量任务要求的范围，不套用功能测试 runner |
 | 提 PR、准备合入 | 整理变更与提交材料，不自动构建或测试；未要求全量功能测试时，不以未测试阻塞提 PR |
@@ -63,7 +63,7 @@ rg -n -i 'v8|maglev' -- <modified-code-files>
 
 - 每轮历史位于执行端 `${XDG_STATE_HOME:-$HOME/.local/state}/ark-runtime/runs/<checkout-id>/<UTC-time>-<shortcommit>-<random>/`，包含 `summary.md`、`run.json`、`logs/command.log`、`results/`。失败和中断也保留；复跑新建记录，不覆盖历史。
 - 脚本记录源码版本、工作区状态、完整命令及退出码。构建配置、依赖版本、用例选择、测试数量和判定依据按第 5、6 步补入报告，不能只凭退出码宣称验证完成。
-- 命令启动时提供 `ARK_RUN_DIR`、`ARK_RESULTS_DIR=$ARK_RUN_DIR/results`、`TMPDIR=$ARK_RESULTS_DIR/tmp`，从启动起记录 stdout/stderr。原始结果使用工具真实支持的接口直接写入 `ARK_RESULTS_DIR`；这些变量不是硬编码路径的重定向器。
+- 命令启动时提供 `ARK_RUN_DIR`、`ARK_RESULTS_DIR=$ARK_RUN_DIR/results`、`TMPDIR=$ARK_RESULTS_DIR/tmp`，从启动起记录 stdout/stderr。这些是记录器提供的目录变量，不是测试工具的接口承诺；仅通过当前工具已支持的参数、配置或环境变量设置原始结果目录。设置变量或套用记录器不会改变工具硬编码的路径。
 - 历史结果不以 `/tmp`、`out/` 或 cache 为唯一保存位置，也不用结束后搬运唯一副本代替直接落盘。可重建编译产物和工具内部附带日志副本可留在 `out/`。缺少原始结果输出接口时记录阻塞，不擅自修改范围外仓库或改全局软链接。
 - `.agents/` 继续维护分支累计对比/实现报告，链接本次持久记录。结果路径注明实际执行主机；不在此规定主机连接、部署或文件回传流程。
 
@@ -75,7 +75,7 @@ runtime_root="$(git rev-parse --show-toplevel)"
 python3 "$history_runner" --repo "$runtime_root" --command '<selected-command>'
 ```
 
-使用单引号让 `$ARK_RESULTS_DIR` 在命令执行时展开。如果执行环境已经提供独立、持久的日志和结果目录，可直接执行同一条构建/测试命令并记录实际路径，不再套一层记录器；本文不要求任何其他 skill 或共享脚本。当前功能 runner、单测入口的输出限制见[输出接口检查](references/full-functional-tests.md#输出接口检查与当前阻塞)；性能原始结果的输出方法见[性能指南](references/jit-performance-tests.md#持久输出接口与限制)。维护本 skill 的记录脚本后，单独执行 `python3 -B -m unittest discover -s <本skill目录>/tests -v`；这是脚本自测，不替代运行时代码验证。
+使用单引号让 `$ARK_RESULTS_DIR` 在命令执行时展开。如果执行环境已经提供独立、持久的日志和结果目录，可直接执行同一条构建/测试命令并记录实际路径，不再套一层记录器；本文不要求任何其他 skill 或共享脚本。功能 runner、单测入口的能力核对与参数见[输出接口检查](references/full-functional-tests.md#输出接口检查)；性能原始结果的输出方法见[性能指南](references/jit-performance-tests.md#持久输出接口与限制)。维护本 skill 的记录脚本后，单独执行 `python3 -B -m unittest discover -s <本skill目录>/tests -v`；这是脚本自测，不替代运行时代码验证。
 
 ## 工作流程
 
@@ -96,7 +96,7 @@ git log -n 10 --oneline -- ecmascript/arksteed
 
 ### 2. 必读解释器、旧 JIT 与 V8 实现，并维护对比报告
 
-**解释器、旧 JIT 和 V8 的对应代码阅读是每次任务的前置步骤，不以“涉及语义变更”或“需要设计比较”为条件。** 在形成方案、修改代码或给出结论前，用 `read` 阅读三方的实际实现；`rg` 只用于定位。阅读范围围绕当前问题，不扩展为遍历整个子系统。
+**本步骤适用于任务分流中涉及实现分析、开发或语义检视的任务。** 在形成方案、修改实现或给出相关结论前，用 `read` 阅读解释器、旧 JIT 和 V8 的对应实际实现；`rg` 只用于定位。阅读范围围绕当前问题，不扩展为遍历整个子系统。
 
 1. **解释器**：阅读 `ecmascript/interpreter/AGENTS.md`、`ecmascript/ic/AGENTS.md`，再读 `ecmascript/interpreter/interpreter-inl.cpp` 中的 C++ 实现和 `ecmascript/compiler/interpreter_stub.cpp` 中的汇编解释器实现。沿实际调用追到承担语义的 stub、runtime 或 factory；核对相关重载及有/无反馈分支，不止看入口。
 2. **旧 JIT**：阅读 `ecmascript/jit/AGENTS.md`、`ecmascript/compiler/AGENTS.md`，在旧 Circuit/Gate + PassManager 流水线中追踪对应的 lowering、优化、代码生成及运行时处理。仅阅读同目录的汇编解释器不能替代旧 JIT 对照。
@@ -191,35 +191,31 @@ python3 "$history_runner" --repo "$runtime_root" --command '
 
 #### 原生 unittest
 
-原生单测的目标与参数如下；当前 action 不完整透出成功用例的原始输出，唯一归档位于 `out`，持久原始结果接口修复前仅作参考，不启动：
+先按[输出接口检查](references/full-functional-tests.md#输出接口检查)核对当前 action 如何保存或透出完整 GTest 原始结果。下面仅列出测试目标和启用参数，不是已配置好持久输出的完整命令；输出要求满足后，再将核实过的命令交给记录器执行。
 
 ```text
 (cd ../.. && python3 ark.py x64.debug arksteed_host_unittest \
   --gn-args=ets_runtime_enable_ark_steed=true)
 ```
 
+不假定 action 存在某个结果目录参数，也不把 GTest 可执行文件支持的参数直接当作 action 支持的参数。只有增量构建无工作、没有本轮原始结果时，不能记为测试通过。
+
 - `arksteed_host_unittest` 是 `ecmascript/arksteed/unittests/BUILD.gn` 中的分组，不包含其他模块或 JS/TS 用例。聚焦单个测试目标时，将分组名替换为对应的 `*Action`，例如 `ArkSteedRegisterAllocatorTestAction`。
-- 显式保留 `--gn-args=ets_runtime_enable_ark_steed=true`；当前默认关闭，目标不会自动开启，不为省略参数而修改 `ark.py` 或全局默认值。
+- GN 参数中显式保留 `ets_runtime_enable_ark_steed=true`；当前默认关闭，目标不会自动开启，不为省略参数而修改 `ark.py` 或全局默认值。
 - 新增原生测试沿用 `host_unittest_action` 和 GTest，注册到该分组；由 GN/Ninja 管理源码依赖，不另写读取编译数据库或复用链接响应文件的专用脚本。
 - `*Action` 用于宿主机或已配置的 QEMU 执行；不带 `Action` 的目标是目标平台测试程序，不代表已部署或已在手机运行。手机端测试须另行核对设备侧分组、构建和部署入口；当前尚未接入 ArkSteed 手机端聚合分组。
 - unittest 验证编译器内部约束，不能代替 JS/TS 的真实机器码、对象初始化、GC 或反优化行为验证。按改动风险选择互补覆盖，并分别记录结果；构建或运行中断不算通过。
 
 #### JS/TS 功能测试
 
-开发阶段默认只构建和验证 **x64 Debug**，包括架构敏感改动。JS/TS runner 默认启用 ArkSteed。选择聚焦用例；`-I` 是相对测试根目录的路径，如 `jittest/createemptyarray_inline_allocation`。以下仅展示真实选择参数：已核对版本硬编码 `/tmp`，缺少结果目录接口，当前停止执行并记录阻塞；不能给它补写不存在的输出参数。
+开发阶段默认只构建和验证 **x64 Debug**，包括架构敏感改动。JS/TS runner 默认启用 ArkSteed。选择聚焦用例；`-I` 是相对测试根目录的路径，如 `jittest/createemptyarray_inline_allocation`。先按[输出接口检查](references/full-functional-tests.md#输出接口检查)核对当前 runner 的产物路径及可配置方式；以下只展示用例选择参数，不预设结果目录参数存在。
 
 ```text
-# Focused x64 debug validation
 python3 ecmascript/arksteed/test/run_arksteed_tests.py \
   -p x64 -m debug -I '<case-or-directory>' -s -v
 ```
 
-ARM64/QEMU 构建和测试耗时较长，仅在用户明确要求且输出阻塞解除后运行；参数参考：
-
-```text
-python3 ecmascript/arksteed/test/run_arksteed_tests.py \
-  -p arm64 -m debug -I '<case-or-directory>' -s -v
-```
+输出要求满足后，将实际支持的输出配置与上述选择参数组合，再交给记录器执行；无法满足时报告阻塞，不自动改 runner。ARM64/QEMU 仅在用户明确要求时，将上述 `-p x64` 替换为 `-p arm64`，并按实际配置核对构建与执行环境。
 
 - 只执行任务需要且用户授权的配置；未运行项标为未验证。
 - 仅当已有与当前源码、依赖、架构、模式及 GN 配置匹配的成功构建时使用 `-F`。源码、rebase 或依赖变化后的首次验证重新构建。

@@ -4,22 +4,28 @@
 
 先读取当前 checkout 的 `ecmascript/arksteed/test/README.md`、`ecmascript/arksteed/unittests/README.md` 与 `BUILD.gn`。**功能测试包含原生 unittest、内部 JS/TS 和 external 三部分**，原生单测使用独立入口，不由 JS/TS runner 代跑。配置顺序为 **x64 Debug → x64 Release → ARM64 Release → ARM64 Debug**，每个配置均包含这三部分；用户限定配置子集时保持该相对顺序，只运行指定范围。**当前配置全部通过后才进入下一配置；任一用例失败或超时，当前配置结束后立即报告并返回，后续配置不再运行。** 本文只涉及功能测试，不自动启动性能测试。聚焦用例通过、只构建成功或仅检查对象文件，均不能报告为全量功能测试通过。
 
-## 输出接口检查与当前阻塞
+## 输出接口检查
 
-先执行主文档的[运行历史与输出目录](../SKILL.md#运行历史与输出目录)约定，再核对本次 checkout 的真实输出接口。**下述 JS/TS runner 与 unittest action 的已核对版本不能完整保存持久原始结果；当前停止启动这些测试，保存非零退出的阻塞记录。普通构建的控制台可由记录器完整保存，不因此阻塞。** 下文保留测试范围、顺序和判定规则，待上游具备输出接口并重新核对后再执行，不是当前可直接运行的矩阵。
+按主文档的[运行历史与输出目录](../SKILL.md#运行历史与输出目录)准备持久记录，检查**本次实际执行端的工具**，不将某台机器或某个版本的支持/阻塞状态写成通用结论。本节规定需要核对的能力，不要求工具实现某个固定名称的参数。
 
-以下是只读核查得到的输出接口证据，未执行构建或测试；实际运行前复核当前 checkout，不把历史行号当作固定接口。
-
-| 入口与核对版本 | 实际源码位置 | 输出限制与所需接口 |
+| 入口 | 核对位置 | 需要确认的能力 |
 |---|---|---|
-| 内部 runner：本地 `/home/like/ohos/a2/arkcompiler/ets_runtime`，commit `aa205fcbe4f0f69cdd1c4254ced2dae312635dc2`，工作区干净 | `ecmascript/arksteed/test/run_arksteed_tests.py:1350–1358`、`:1443–1484`、`:1537–1538`、`:1581–1584` | `make_artifacts_root()` 硬编码 `Path("/tmp")`，CLI 没有结果目录参数；abc、IR/反汇编、stdout/stderr、`run.meta.json`、`summary.md` 随此根目录写入。需要 runner 提供可指定绝对产物根目录的接口，并让所有原始输出和失败报告都使用它。 |
-| external runner：`work:/root/ohos/a0/arksteed_external_tests`，commit `4b251a2b4b05627ac6df06bd04c06c3d1abed354`，工作区干净 | `run_arksteed_external_tests.py:825–833`、`:936–1004`、`:1054–1055`、`:1101–1104` | 同样硬编码 `Path("/tmp")`，没有结果目录 CLI；`-R` 只定位构建树。需要独立的绝对产物目录接口，不能把 `-R` 当结果目录。 |
-| 构建：本地 `/home/like/ohos/a2/ark.py` | `:46–59`、`:852–890` | `build_for_gn_target()` 将 `build.log` 写到 `out_path`，`call_with_output()` 同时打印。记录器从启动起直接保存控制台，可用于构建历史；不要求消除工具内部附带的 `out` 日志副本。 |
-| 原生 unittest：上述 runtime checkout | `ecmascript/arksteed/unittests/BUILD.gn:15–38` → `test/test_helper.gni:40–170` → `script/run_ark_executable.py:165–176,179–191,239–271` | action 捕获测试 stdout/stderr；成功时不打印原始 GTest 输出，目标目录存在时还把 stdout 归档到相对构建目录的 `gen/arkcompiler/ets_runtime/stub_code_comment.zip`。需要 action 支持持久日志/报告目录或完整透出原始结果。外层控制台不能替代未透出的 GTest 结果，也不能依赖结束后从可覆盖的共享 zip 抢救唯一副本。 |
+| 内部 JS/TS | 当前 `ecmascript/arksteed/test/README.md`、runner 的 CLI 和产物目录创建/写入代码 | abc、IR/反汇编、stdout/stderr、元数据和汇总各自写到哪里；现有参数、配置或环境变量是否能将它们直接写入本轮持久目录。 |
+| external | 当前 external checkout 的 README、runner CLI 和产物写入代码 | 独立核对输出能力，不套用内部 runner 的参数；`-R` 用于定位构建树，不等同于结果目录。 |
+| 原生 unittest | 当前 `ecmascript/arksteed/unittests/BUILD.gn` → `test/test_helper.gni` 的 action → 实际执行脚本 | 完整 GTest 原始输出是否直接持久保存，或完整透出至记录器；成功、失败、超时路径均需核对。仅有成功摘要或共享 ZIP 副本不够。 |
+| 构建 | 当前 `ark.py` 及其日志调用链 | 完整构建控制台能否由记录器保存；工具在 `out` 中保留附带副本不构成阻塞。 |
 
-这些源码位置是核查快照，不是所有 checkout 永久相同的断言。执行前复核实际版本；`ark.py` 属于构建树而非 runtime Git，本次文件 SHA-256 为 `082a499d57592b291680e59b37ba8e8d6c13525a7931a8ac6828b41a84154dd6`，后续另记录实际文件版本/哈希。上述两个 JS/TS runner 未使用 `tempfile` 来选择产物根，`TMPDIR` 对它们无效；不得靠设置环境变量、运行后复制、patch Python 函数、修改全局 `/tmp` 或移动共享 `results` 软链接掩盖阻塞。此任务不授权修改这些仓库。
+按检查结果处理：
 
-解除阻塞后的输出布局：按本 skill 的运行历史约定准备 `$ARK_RUN_DIR` 和 `$ARK_RESULTS_DIR`；可使用自带的 `scripts/run_with_history.py` 保存控制台，也可使用执行环境已经提供的持久记录。内部/external 通过各自已核实的接口写入 `results/internal/`、`results/external/`；多配置再按配置分目录。配置汇总写 `$ARK_RESULTS_DIR/config-summary.tsv`，正常和失败都保留。runner 原生 `run.meta.json`、`summary.md` 与本轮元数据分开保存，不依赖任何外部 skill 的会话格式。不要在接口尚未实现时复制带假想参数的运行命令。
+1. **支持持久输出**：使用已核实的接口配置独立的本轮目录，再执行请求的测试。只需完整控制台即可保留全部原始结果时，可直接由记录器保存；另有原始产物时仍需核对其路径。
+2. **尚未核实**：继续只读检查 README、CLI 和源码，不能把“没找到参数”直接判成不支持，也不启动测试来猜接口。
+3. **不能满足保存要求**：记录缺失能力、源码依据、已保存的控制台路径和 `BLOCKED`，停止该测试入口；普通构建可独立执行。将工具改造作为建议提出，只有用户明确授权具体仓库修改后才处理。
+
+记录器能保存控制台并提供 `ARK_RESULTS_DIR`、`TMPDIR`，不能改变工具硬编码的路径，也不能保存 action 未透出的输出。不要编造 CLI/GN 参数、靠结束后搬运唯一副本或修改全局软链接绕过检查。
+
+目录存在或 `ninja: no work to do` 均不是本轮测试通过的证据；核对本轮实际执行和原始结果，不把增量缓存当作新验证。具体接口、源码版本和实际支持状态记在当次报告，不绑定本指南到本地补丁。
+
+输出布局按已有接口的能力设置：优先在 `$ARK_RESULTS_DIR` 下按配置及 `internal/`、`external/`、`unittest/` 分目录；执行环境已有独立持久目录时记录实际路径。配置汇总写 `$ARK_RESULTS_DIR/config-summary.tsv`。工具原生元数据、汇总与外层运行记录分开保存。
 
 ## 1. 准备并确认 external 用例
 
@@ -34,7 +40,7 @@ external 默认使用用户指定的仓库：**https://gitcode.com/xing-yunhao-h
 
 每个配置分别运行原生 unittest、内部 JS/TS 与 external 三套测试，全部执行且通过后，才能报告该配置的全量功能测试通过。**只执行用户要求的配置**；单独请求 ARM64 Release 全量功能测试时不自动扩大到 Debug 或其他架构，未运行项标为未验证。
 
-输出阻塞解除并重新核实接口后，采用 **配置间串行、配置内先构建并完成 unittest，再并行运行内部与 external** 的编排：
+输出接口检查通过后，采用 **配置间串行、配置内先构建并完成 unittest，再并行运行内部与 external** 的编排：
 
 1. 核对三套测试使用相同源码、依赖、架构、模式和 GN 配置，先完成该配置的构建（包括 stub 和跨架构所需的 host `es2abc`）。构建失败同样停止后续配置并报告，本配置三套测试均记为未执行，不使用旧产物继续跑。
 2. 使用 `arksteed_host_unittest` 构建并运行本配置的全部 ArkSteed 原生单测；仅构建可执行文件不算运行通过。保留 `ets_runtime_enable_ark_steed=true`，ARM64/QEMU 配置还需 `run_with_qemu=true`，其余 GN 参数与前一步保持一致。该入口会增量构建单测依赖，不与 JS/TS runner 并发写构建产物。若单测命令失败或受阻，记录真实退出码，停止本配置剩余阶段及后续配置，不继续使用可能不完整的产物。
@@ -56,14 +62,14 @@ external 默认使用用户指定的仓库：**https://gitcode.com/xing-yunhao-h
 
 ### 2.2 执行与退出码收集要求
 
-在输出接口阻塞解除前，不启动矩阵，也不提供假想的输出参数。以下是 x64 Debug 的三个原始入口；输出接口就绪后，按用户授权的配置替换平台/模式，并依据下述顺序、并发和停止规则执行。本 skill 负责这些方法、参数与成功标准，不规定主机连接或源码部署方式。
+以下仅列出 x64 Debug 的三个测试入口及选择参数，**未包含因工具版本而异的输出配置，不是可直接执行的持久化测试脚本**。先通过输出接口检查，将真实支持的输出配置加入所选命令，再交给记录器执行，并按下述规则编排和收集退出码。只按用户授权替换平台/模式，本 skill 不规定主机连接或源码部署方式。
 
 ```text
-# Build and run native unit tests first.
+# Native unit test target
 (cd ../.. && python3 ark.py x64.debug arksteed_host_unittest \
   --gn-args=ets_runtime_enable_ark_steed=true)
 
-# Run these two suites only after the configuration build and unit tests pass.
+# Internal and external case selection after a matching successful build
 python3 ecmascript/arksteed/test/run_arksteed_tests.py \
   -p x64 -m debug -F -j "$ARKSTEED_INTERNAL_JOBS"
 python3 "$ark_root/arksteed_external_tests/run_arksteed_external_tests.py" \
@@ -73,7 +79,7 @@ python3 "$ark_root/arksteed_external_tests/run_arksteed_external_tests.py" \
 逐项落实：
 
 - 每次只推进已授权配置，保持 x64 Debug → x64 Release → ARM64 Release → ARM64 Debug 的相对顺序；ARM64 跨架构先确认 QEMU。资源预算改变时在下个配置开始前重新评估。
-- 当前内部 runner 没有独立 build-only CLI；原编排使用 `BuildConfig` / `build_ark()`。若继续复用，先核对其参数、stub、host `es2abc` 与 external 构建需求；不能以引入另一套临时构建脚本替代输出接口修复。
+- 从当前 runner 文档和源码确认构建入口及依赖，包括 stub、host `es2abc` 与 external 所需产物；只复用现有且已核实的入口，不为执行本指南另改外部构建/测试脚本。
 - 构建和 unittest 分阶段执行，失败即收集本阶段真实退出码，剩余阶段记为 `NOT_RUN`，后续配置记为 `SKIP_AFTER_<config>`。没有本轮实际执行证据的增量缓存成功，不算单测通过。
 - unittest 成功后，以 `-F -j "$ARKSTEED_INTERNAL_JOBS"` 和 `-F -j "$ARKSTEED_EXTERNAL_JOBS"` 并行两套 runner；external 另带 `-R "$ark_root"`。各自 stdout/stderr 从启动起重定向到本轮 `$ARK_RUN_DIR/logs/` 下不同的配置/套件文件，原始产物通过核实后的 runner 接口直写 `results/` 子目录。全量不加 `-s`。
 - 分别 `wait` 两个 PID 并立即保存各自退出码；一套失败仍等待另一套，不用后一个 `wait` 覆盖前一个结果。当前配置结束后再决定是否进入下一配置；复合命令任一阶段失败最终返回非零。
@@ -91,6 +97,6 @@ python3 "$ark_root/arksteed_external_tests/run_arksteed_external_tests.py" \
 1. 按约定顺序列出用户要求的全部配置，标明通过、失败或未执行；未执行项注明“前序配置失败”及触发配置，或实际环境阻塞原因。
 2. 说明触发停止的配置与阶段（构建、unittest、内部或 external），分别列出三套测试的实际退出码或未执行原因；一套测试失败不能掩盖其他套的结果。
 3. 列出已执行范围的收集/执行/通过/失败/超时数量，以及失败用例、原因和日志位置；runner 异常退出导致报告缺失时注明缺失，不补造统计。
-4. 附源码与依赖版本、实际命令、worker 分配依据、配置汇总和三套原始报告或日志的持久路径，远端标明 `work:`，并提供运行 ID 与记录目录。已有 `.agents/` 累计报告只链接这些不可变记录。将复跑或修复建议作为后续事项，不自动继续未执行配置。
+4. 附源码与依赖版本、实际命令、worker 分配依据、配置汇总和三套原始报告或日志的持久路径，注明实际执行主机，并提供运行 ID 与记录目录。已有 `.agents/` 累计报告只链接这些不可变记录。将复跑或修复建议作为后续事项，不自动继续未执行配置。
 
 明确区分通过、失败和未执行/受阻。环境不可用、缺少 external 或测试失败不能改判为通过或不涉及；前序配置通过不代表整套矩阵通过，只有约定范围内的全部用例执行且通过，才报告本次全量功能测试通过。

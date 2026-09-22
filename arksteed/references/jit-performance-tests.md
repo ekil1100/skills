@@ -2,7 +2,7 @@
 
 性能测试使用独立项目 **[JIT-Bench](https://gitcode.com/chaoxx/JIT-Bench)**。只执行任务要求的引擎、架构、用例和对比范围；全量功能测试、提 PR 或编写性能测试说明不会自动授权性能测量。JIT-Bench 的正确性套件也不能替代本 skill 的内部/external 全量功能测试。
 
-性能口径原依据 JIT-Bench commit `02307560c9eab7dccc1d47432135d8bc1fc76721` 的 README、运行指南、度量方法、tier 配置和 CLI/compare 源码；本次输出接口另按本地 commit `d5f2f08e4126e2878051a68e83a4dcf22be7209c` 的实际实现核对（证据见下）。执行时先阅读所用 checkout 的 `README.md`、`docs/TESTING.md`、`docs/METHODOLOGY.md`、`config/tiers.json`，用 `./jb-py --help` 核对接口；用例数量和支持范围以该版本的 `list`、spec 和实现为准，不沿用旧文档中的数量。
+执行时先阅读所用 checkout 的 `README.md`、`docs/TESTING.md`、`docs/METHODOLOGY.md`、`config/tiers.json`，用 `./jb-py --help` 核对接口；用例数量、tier 配置和输出行为以该版本的 `list`、spec 和实现为准。将实际源码版本、工作区状态及核查证据写入本轮报告，不沿用旧运行记录作为当前能力证明。
 
 ## 持久输出接口与限制
 
@@ -11,20 +11,20 @@
 - `run --out` 实际是**文件名前缀**，不是目录参数。传已存在持久目录内的**绝对路径前缀**，如 `--out "$ARK_RESULTS_DIR/ark-loop-sum"`；输出为此前缀加 `-performance[-noosr]-<timestamp>.json/.md`。不要传相对 `results/...`，不要只改 cwd 或设置 `TMPDIR`，也不先写 benchmark checkout 再搬运。
 - 绝对前缀可行的原因：CLI 原样传 `label`，报告器拼出带时间戳文件名，再调用 `os.path.join(OUT_DIR, absolute_name)`，绝对路径会取代 `OUT_DIR`。报告器只自动创建默认 `OUT_DIR`，不会为此前缀创建父目录；运行前确保 `$ARK_RESULTS_DIR` 已存在，自建子目录时显式 `mkdir -p`。它仍可能创建 checkout 的空 `results/`，但 JSON/Markdown 直接写指定的持久路径，不把该空目录当历史。
 - `compare --out`、`merge --out`、`baseline-check --out` 是各自的输出路径/前缀，均使用 `$ARK_RESULTS_DIR` 下的绝对路径；CSV 同理。四组采样、诊断、比较可分属不同运行记录，交付时逐一链接，不假定共享当前 `ARK_RESULTS_DIR`。
-- 原生 `transport=local` 的 Ark 后端使用 Python `tempfile`，因此记录器在进程启动前提供的可写 `TMPDIR=$ARK_RESULTS_DIR/tmp` 对 staging 有效。普通运行会清理 staging，它是编译中间文件而非最终历史；需要保留诊断 staging 时使用已核实的 `--debug`，并与正式性能数据分开。`work` 上 SSH 启动的原生进程仍属此 `local` transport。
+- 原生 `transport=local` 的 Ark 后端使用 Python `tempfile`，因此记录器在进程启动前提供的可写 `TMPDIR=$ARK_RESULTS_DIR/tmp` 对 staging 有效。普通运行会清理 staging，它是编译中间文件而非最终历史；需要保留诊断 staging 时使用已核实的 `--debug`，并与正式性能数据分开。通过 SSH 在远端启动的原生进程仍属此 `local` transport；按实际执行环境核对。
 - Docker 后端的容器 staging 默认硬编码 `/tmp/jitbench`，宿主 `TMPDIR` 不会改变它；本指南的持久路径示例不覆盖容器运行。未核实容器 `containerWorkDir`、持久挂载和清理行为前停止容器测量，报告阻塞，不自动切换 transport。
 - **中断/原始日志限制**：报告器在整轮结束才保存 JSON/Markdown，进程样本此前在内存中；异常退出或强制中断可能只有外层持久日志，没有样本 JSON。引擎 stdout/stderr 在内部通过 PIPE 捕获，最终只保留 `stderrTail` 等摘要，外层 `logs/command.log` 不是完整引擎日志。不得声称失败时所有样本/引擎日志均已保存；若任务要求逐样本抗中断保存或完整引擎日志，则当前阻塞，需要上游新增逐样本增量写盘及子进程日志直写接口。失败记录仍保留并注明缺失，不用 `--debug` 冒充此接口。
 
-源码证据（本次只读核查，未运行引擎）：本地 `/home/like/ohos/a2/JIT-Bench`，commit `d5f2f08e4126e2878051a68e83a4dcf22be7209c`，工作区干净。
+执行前按以下入口核对上述接口和限制；文件路径相对当前 JIT-Bench checkout，文件或符号变化时沿实际调用定位，不依赖旧行号。
 
-| 文件与行号（相对该 checkout） | 核实事实 |
+| 核对入口 | 检查内容 |
 |---|---|
-| `harness/cli.py:450–453,471–491,745` | `--plan` 在启动引擎前返回；`--out` 原样传给 `write_report(label=...)`，整轮完成才写报告。 |
-| `harness/result.py:14,375–387,416–420` | 默认目录与绝对前缀拼接；JSON/Markdown 首次落盘路径。 |
-| `harness/cli.py:668–698,713–720` | compare/merge/baseline-check 输出路径及父目录创建。 |
-| `harness/backend_ark.py:201–209,242–285,294–296` | 本机 tempfile、stdout/stderr PIPE、普通 staging 清理；容器独立 staging。 |
-| `harness/runner.py:181–197` | 保存 `stderrTail`，不是完整 stdout/stderr。 |
-| `/usr/lib/python3.10/tempfile.py:295–317`（本机 Python 标准库） | 临时目录候选先读取 `TMPDIR`；不能推广到硬编码 `/tmp` 的其他 runner。 |
+| `harness/cli.py` | `--plan` 是否在启动引擎前返回；`--out` 如何传给报告器；compare/merge/baseline-check 的输出路径及父目录处理。 |
+| `harness/result.py` | 默认目录与绝对前缀如何拼接；JSON/Markdown 何时首次落盘。 |
+| `harness/backend_ark.py` | staging 是否使用 `tempfile`；stdout/stderr 捕获方式；普通运行与容器的目录和清理行为。 |
+| `harness/runner.py` | 保存完整引擎日志还是仅保留摘要；中断时样本是否已落盘。 |
+
+`TMPDIR` 仅对实际读取它的临时目录机制生效；核对执行端 Python 与工具调用方式，不能推广到硬编码路径的 runner。
 
 ## 1. 准备独立 checkout 与 Release 引擎
 
@@ -206,4 +206,4 @@ case,itp,maglev,arksteed before,arksteed after,itp vs arksteed,maglev vs arkstee
 
 交付时给出 CSV 保存路径，并将同一份汇总数据在最终回复中展示为**完整的 Markdown 表格**：沿用 CSV 的八列表头、行顺序和单元格数值，包含目标清单的全部用例；表格前注明耗时单位为 ms、百分比正值为劣化、负值为优化。直接输出可渲染的 Markdown 表格，不放进代码块，不 raw print CSV，也不能只给路径或摘要。即使测试未全部完成，也展示已有结果和 `N/A`，明确未完成范围；CSV 与展示表格不替代 JIT-Bench 的原始证据和验收门禁，门禁未通过时标为非正式结果。
 
-交付注明 JIT-Bench/Ark/V8 版本与 dirty 状态、实际 binary/运行库哈希、构建配置、机器和测量条件、完整命令与退出码、选择/执行/有效/失败/未执行数量，以及各组运行 ID、记录目录、原始 JSON、Markdown、比较报告、CSV 和日志的持久绝对路径（远端标明 `work:`）。已有 `.agents/` 累计报告链接这些历史，不覆盖原始结果。说明聚焦筛选依据或全套授权、冻结清单与实际执行的差异、性能结论适用的范围、证据限制和剩余问题，不把本次性能测试扩展为全量功能测试通过。
+交付注明 JIT-Bench/Ark/V8 版本与 dirty 状态、实际 binary/运行库哈希、构建配置、机器和测量条件、完整命令与退出码、选择/执行/有效/失败/未执行数量，以及各组运行 ID、记录目录、原始 JSON、Markdown、比较报告、CSV 和日志的持久绝对路径（注明实际执行主机）。已有 `.agents/` 累计报告链接这些历史，不覆盖原始结果。说明聚焦筛选依据或全套授权、冻结清单与实际执行的差异、性能结论适用的范围、证据限制和剩余问题，不把本次性能测试扩展为全量功能测试通过。
