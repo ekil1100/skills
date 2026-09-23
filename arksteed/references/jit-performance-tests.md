@@ -6,13 +6,13 @@
 
 ## 持久输出接口与限制
 
-遵循主文档的[运行历史与输出目录](../SKILL.md#运行历史与输出目录)。本 skill 独立给出以下性能测试方法与命令；需要自动记录时，使用本 skill 自带的 `$history_runner`（`scripts/run_with_history.py`）：`python3 "$history_runner" --repo "$runtime_root" --command '<命令体>'`。如果执行环境已经提供持久日志与结果目录，直接执行相同命令体，不要求额外包装。**下面独立的 `./jb-py` shell 块均在 JIT-Bench 根目录、已设置持久结果目录的环境中执行。** 跨轮比较使用原始 JSON 的已确认绝对路径，派生报告写本轮目录，不改写旧记录。
+遵循主文档的[运行历史与输出目录](../SKILL.md#运行历史与输出目录)。本 skill 独立给出以下性能测试方法与命令；需要自动记录时，使用本 skill 自带的 `$history_runner`（`scripts/run_with_history.py`）：`python3 "$history_runner" --repo "$runtime_root" --command '<命令体>'`。如果执行环境已经提供持久日志与结果目录，直接执行相同命令体，不要求额外包装。**下面独立的 `./jb-py` shell 块均在 JIT-Bench 根目录执行，示例使用 `$ARK_RESULTS_DIR` 归集结果，但不限制外部工具的保存目录。** 可沿用工具默认目录或用户指定目录，记录实际路径并按需复制归档；跨轮比较使用原始 JSON 的已确认绝对路径，派生报告写本轮目录，不改写旧记录。
 
-- `run --out` 实际是**文件名前缀**，不是目录参数。传已存在持久目录内的**绝对路径前缀**，如 `--out "$ARK_RESULTS_DIR/ark-loop-sum"`；输出为此前缀加 `-performance[-noosr]-<timestamp>.json/.md`。不要传相对 `results/...`，不要只改 cwd 或设置 `TMPDIR`，也不先写 benchmark checkout 再搬运。
+- `run --out` 实际是**文件名前缀**，不是目录参数。需要指定目录时，可传已存在目录内的**绝对路径前缀**，如 `--out "$ARK_RESULTS_DIR/ark-loop-sum"`；输出为此前缀加 `-performance[-noosr]-<timestamp>.json/.md`。使用默认或相对前缀时核对工具实际解析出的路径；仅改 cwd 或设置 `TMPDIR` 不保证改变报告目录。
 - 绝对前缀可行的原因：CLI 原样传 `label`，报告器拼出带时间戳文件名，再调用 `os.path.join(OUT_DIR, absolute_name)`，绝对路径会取代 `OUT_DIR`。报告器只自动创建默认 `OUT_DIR`，不会为此前缀创建父目录；运行前确保 `$ARK_RESULTS_DIR` 已存在，自建子目录时显式 `mkdir -p`。它仍可能创建 checkout 的空 `results/`，但 JSON/Markdown 直接写指定的持久路径，不把该空目录当历史。
-- `compare --out`、`merge --out`、`baseline-check --out` 是各自的输出路径/前缀，均使用 `$ARK_RESULTS_DIR` 下的绝对路径；CSV 同理。四组采样、诊断、比较可分属不同运行记录，交付时逐一链接，不假定共享当前 `ARK_RESULTS_DIR`。
+- `compare --out`、`merge --out`、`baseline-check --out` 是各自的输出路径/前缀，示例使用 `$ARK_RESULTS_DIR` 下的绝对路径。四组采样、诊断、比较可分属不同运行记录，交付时逐一链接，不假定共享当前 `ARK_RESULTS_DIR`。
 - 原生 `transport=local` 的 Ark 后端使用 Python `tempfile`，因此记录器在进程启动前提供的可写 `TMPDIR=$ARK_RESULTS_DIR/tmp` 对 staging 有效。普通运行会清理 staging，它是编译中间文件而非最终历史；需要保留诊断 staging 时使用已核实的 `--debug`，并与正式性能数据分开。通过 SSH 在远端启动的原生进程仍属此 `local` transport；按实际执行环境核对。
-- Docker 后端的容器 staging 默认硬编码 `/tmp/jitbench`，宿主 `TMPDIR` 不会改变它；本指南的持久路径示例不覆盖容器运行。未核实容器 `containerWorkDir`、持久挂载和清理行为前停止容器测量，报告阻塞，不自动切换 transport。
+- Docker 后端的容器 staging 默认硬编码 `/tmp/jitbench`，宿主 `TMPDIR` 不会改变它；本指南的宿主路径示例不直接适用于容器。沿用容器自身目录，记录 `containerWorkDir`、挂载和清理行为；固定临时路径本身不阻塞测量，不因此自动切换 transport。
 - **中断/原始日志限制**：报告器在整轮结束才保存 JSON/Markdown，进程样本此前在内存中；异常退出或强制中断可能只有外层持久日志，没有样本 JSON。引擎 stdout/stderr 在内部通过 PIPE 捕获，最终只保留 `stderrTail` 等摘要，外层 `logs/command.log` 不是完整引擎日志。不得声称失败时所有样本/引擎日志均已保存；若任务要求逐样本抗中断保存或完整引擎日志，则当前阻塞，需要上游新增逐样本增量写盘及子进程日志直写接口。失败记录仍保留并注明缺失，不用 `--debug` 冒充此接口。
 
 执行前按以下入口核对上述接口和限制；文件路径相对当前 JIT-Bench checkout，文件或符号变化时沿实际调用定位，不依赖旧行号。
@@ -96,7 +96,7 @@ python3 "$history_runner" --repo "$runtime_root" --command '
 '
 ```
 
-确认计划符合授权范围后，在新的运行记录中移除 `--plan` 执行，其余采样参数保持一致，输出进入本轮的持久目录。把示例用例替换为本次优化对应的热点，不用一个 micro 用例代表整个 JIT 性能。
+确认计划符合授权范围后，在新的运行记录中移除 `--plan` 执行，其余采样参数保持一致，记录实际输出路径。把示例用例替换为本次优化对应的热点，不用一个 micro 用例代表整个 JIT 性能。
 
 - `--case` 精确匹配完整 ID；聚焦执行优先逐 ID 使用 `--case`，多个 ID 的批量写法先核对当前 CLI 是否支持。`--match` 是 ID 前缀，例如 `performance/micro/`，仅在展开集合恰好等于冻结清单时使用。聚焦命令始终保留用例过滤器；批量性能命令显式保留 `--suite performance`，避免误入正确性模式。
 - 不带其他过滤器的 `--suite performance` 包含 `kind=performance|both`，可能运行 `correctness/` 下的双用途用例。用户明确授权全套后，才去掉聚焦过滤器，使用 `--suite performance`，不改用还会执行正确性套件的 `--suite all`。`--profile cross-engine` 选择跨引擎负载并排除消融和 Ark no-OSR 专项，不等于全套；核对两侧共有用例与引擎白名单。全套中的 Ark 专用用例仍保留 Ark 测量，对侧不支持的 CSV 单元格标为 `N/A`，不能只跑共有子集就宣称全套完成。
@@ -131,7 +131,7 @@ python3 "$history_runner" --repo "$runtime_root" --command '
   --out "${ARK_RESULTS_DIR:?}/before-vs-after.md"
 ```
 
-将 `before_json` / `after_json` 设置为前后两次持久记录中实际的单个 JSON 文件绝对路径，不使用可能展开为多份历史结果的通配符。当前 `compare` 会对同引擎 binary SHA-256 变化给出不可用于 A/B 结论的警告，对 Ark runtime 库变化给出不能只归因于 optimizer 的警告；保留并解释这些限制，不能仅凭比较表有数字就宣称回归验证通过。
+将 `before_json` / `after_json` 设置为前后两次运行实际的单个 JSON 文件绝对路径（原路径或归档路径），不使用可能展开为多份历史结果的通配符。当前 `compare` 会对同引擎 binary SHA-256 变化给出不可用于 A/B 结论的警告，对 Ark runtime 库变化给出不能只归因于 optimizer 的警告；保留并解释这些限制，不能仅凭比较表有数字就宣称回归验证通过。
 
 **跨引擎对比**：上述默认四组数据包含 Maglev；用户明确限定为 Ark-only 时跳过 V8，并说明缺失列。设置 `JITBENCH_D8` 为已确认的 d8 路径，通过 `./jb-py doctor --engine v8-d8 --probe-ignition-only` 核对实际 binary 支持当前 Ignition-only flags 且保留 RegExp native code。下面是同时比较两侧解释器加速比的聚焦跨引擎 profile 示例；仅采集 CSV 的 Maglev 基线时，V8 的 `--tier` 使用 `optimized` 即可。将 `selected_case_id` 设置为冻结清单中的实际 ID，逐项运行；先确认 profile 未排除目标用例，两条实际命令也先追加 `--plan` 检查范围：
 
@@ -162,7 +162,7 @@ python3 "$history_runner" --repo "$runtime_root" --command '
 
 ## 5. 结果判读与交付
 
-- 原始结果为对应命令 `$ARK_RESULTS_DIR/<label>-performance-<timestamp>.json` 和同名 Markdown；JSON 保存进程样本和指纹，比较使用 JSON，不从 Markdown 或控制台四舍五入值重新计算。
+- 原始结果为对应命令实际生成的 JSON 和同名 Markdown；按本文示例为 `$ARK_RESULTS_DIR/<label>-performance-<timestamp>.json`。JSON 保存进程样本和指纹，比较使用 JSON，不从 Markdown 或控制台四舍五入值重新计算。
 - `medianMs` 是独立进程 median 的 median，越低越好；JIT 加速比为 `interpreter / optimized`，越高越好。`compare` 的耗时比为 **B/A**：小于 1 表示 B 更快；bootstrap 95% CI 完全低于/高于 1 才判方向，覆盖 1 是不可判，不是已证明无回退。CI 不消除系统性偏差。
 - 逐项报告高波动、失败、超时、缺失验证、无效 tier、排除原因和环境警告。生成报告或退出码 0 不等于性能无回退；样本不足、范围未覆盖或条件不可比时明确标为未验证/探索性结果。
 - 稳态、冷启动、编译和内存分开解读。Ark 冷启动 wall time 包含 `es2abc`，不能直接等同于 V8 VM 启动耗时；RSS 不是 JS heap。
@@ -206,4 +206,4 @@ case,itp,maglev,arksteed before,arksteed after,itp vs arksteed,maglev vs arkstee
 
 交付时给出 CSV 保存路径，并将同一份汇总数据在最终回复中展示为**完整的 Markdown 表格**：沿用 CSV 的八列表头、行顺序和单元格数值，包含目标清单的全部用例；表格前注明耗时单位为 ms、百分比正值为劣化、负值为优化。直接输出可渲染的 Markdown 表格，不放进代码块，不 raw print CSV，也不能只给路径或摘要。即使测试未全部完成，也展示已有结果和 `N/A`，明确未完成范围；CSV 与展示表格不替代 JIT-Bench 的原始证据和验收门禁，门禁未通过时标为非正式结果。
 
-交付注明 JIT-Bench/Ark/V8 版本与 dirty 状态、实际 binary/运行库哈希、构建配置、机器和测量条件、完整命令与退出码、选择/执行/有效/失败/未执行数量，以及各组运行 ID、记录目录、原始 JSON、Markdown、比较报告、CSV 和日志的持久绝对路径（注明实际执行主机）。已有 `.agents/` 累计报告链接这些历史，不覆盖原始结果。说明聚焦筛选依据或全套授权、冻结清单与实际执行的差异、性能结论适用的范围、证据限制和剩余问题，不把本次性能测试扩展为全量功能测试通过。
+交付注明 JIT-Bench/Ark/V8 版本与 dirty 状态、实际 binary/运行库哈希、构建配置、机器和测量条件、完整命令与退出码、选择/执行/有效/失败/未执行数量，以及各组运行 ID、持久记录目录、原始 JSON、Markdown、比较报告、CSV 和日志的实际绝对路径（注明实际执行主机）。区分工具原始路径与归档副本，注明临时路径的清理风险和缺失内容；已有 `.agents/` 累计报告链接可用记录，不覆盖原始结果。说明聚焦筛选依据或全套授权、冻结清单与实际执行的差异、性能结论适用的范围、证据限制和剩余问题，不把本次性能测试扩展为全量功能测试通过。

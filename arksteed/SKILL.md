@@ -64,7 +64,7 @@ rg -n -i 'v8|maglev' -- <modified-code-files>
 - 每轮历史位于执行端 `${XDG_STATE_HOME:-$HOME/.local/state}/ark-runtime/runs/<checkout-id>/<UTC-time>-<shortcommit>-<random>/`，包含 `summary.md`、`run.json`、`logs/command.log`、`results/`。失败和中断也保留；复跑新建记录，不覆盖历史。
 - 脚本记录源码版本、工作区状态、完整命令及退出码。构建配置、依赖版本、用例选择、测试数量和判定依据按第 5、6 步补入报告，不能只凭退出码宣称验证完成。
 - 命令启动时提供 `ARK_RUN_DIR`、`ARK_RESULTS_DIR=$ARK_RUN_DIR/results`、`TMPDIR=$ARK_RESULTS_DIR/tmp`，从启动起记录 stdout/stderr。这些是记录器提供的目录变量，不是测试工具的接口承诺；仅通过当前工具已支持的参数、配置或环境变量设置原始结果目录。设置变量或套用记录器不会改变工具硬编码的路径。
-- 历史结果不以 `/tmp`、`out/` 或 cache 为唯一保存位置，也不用结束后搬运唯一副本代替直接落盘。可重建编译产物和工具内部附带日志副本可留在 `out/`。缺少原始结果输出接口时记录阻塞，不擅自修改范围外仓库或改全局软链接。
+- 本 skill 自带记录器的历史保存在上述持久目录；外部脚本（包括运行时仓库的 JS/TS runner、native action、external runner 和 JIT-Bench）沿用自身输出规则，不限制其保存目录。产物写入 `/tmp`、`out/` 或 cache、没有可配置输出目录、成功用例日志未完整透出，均不单独构成测试阻塞；记录实际路径、可用证据和缺失内容，按需复制已有结果到历史目录归档，不为满足目录或日志要求改造外部脚本。
 - `.agents/` 继续维护分支累计对比/实现报告，链接本次持久记录。结果路径注明实际执行主机；不在此规定主机连接、部署或文件回传流程。
 
 先选择下文对应的构建/测试命令，再在已准备好的执行环境记录它：
@@ -191,14 +191,14 @@ python3 "$history_runner" --repo "$runtime_root" --command '
 
 #### 原生 unittest
 
-先按[输出接口检查](references/full-functional-tests.md#输出接口检查)核对当前 action 如何保存或透出完整 GTest 原始结果。下面仅列出测试目标和启用参数，不是已配置好持久输出的完整命令；输出要求满足后，再将核实过的命令交给记录器执行。
+先按[输出接口检查](references/full-functional-tests.md#输出接口检查)了解当前 action 的日志、结果和退出码处理，再将以下测试命令交给记录器执行。成功用例日志未完整透出时，保留实际可见的输出并注明缺口，不因此停止测试。
 
 ```text
 (cd ../.. && python3 ark.py x64.debug arksteed_host_unittest \
   --gn-args=ets_runtime_enable_ark_steed=true)
 ```
 
-不假定 action 存在某个结果目录参数，也不把 GTest 可执行文件支持的参数直接当作 action 支持的参数。只有增量构建无工作、没有本轮原始结果时，不能记为测试通过。
+不假定 action 存在某个结果目录参数，也不把 GTest 可执行文件支持的参数直接当作 action 支持的参数。判定通过需确认本轮测试实际执行、覆盖请求范围且失败能正确传递到入口退出码；可使用 action 的执行记录、成功摘要和退出码，不要求成功用例的完整日志。只有增量构建无工作时，不能记为测试通过；无依据的用例数量标为未知。
 
 - `arksteed_host_unittest` 是 `ecmascript/arksteed/unittests/BUILD.gn` 中的分组，不包含其他模块或 JS/TS 用例。聚焦单个测试目标时，将分组名替换为对应的 `*Action`，例如 `ArkSteedRegisterAllocatorTestAction`。
 - GN 参数中显式保留 `ets_runtime_enable_ark_steed=true`；当前默认关闭，目标不会自动开启，不为省略参数而修改 `ark.py` 或全局默认值。
@@ -215,7 +215,7 @@ python3 ecmascript/arksteed/test/run_arksteed_tests.py \
   -p x64 -m debug -I '<case-or-directory>' -s -v
 ```
 
-输出要求满足后，将实际支持的输出配置与上述选择参数组合，再交给记录器执行；无法满足时报告阻塞，不自动改 runner。ARM64/QEMU 仅在用户明确要求时，将上述 `-p x64` 替换为 `-p arm64`，并按实际配置核对构建与执行环境。
+将上述命令交给记录器执行；有已核实的输出配置时可按需使用，没有时沿用 runner 默认路径并记录，包括硬编码的 `/tmp`，不因此阻塞或修改 runner。ARM64/QEMU 仅在用户明确要求时，将上述 `-p x64` 替换为 `-p arm64`，并按实际配置核对构建与执行环境。
 
 - 只执行任务需要且用户授权的配置；未运行项标为未验证。
 - 仅当已有与当前源码、依赖、架构、模式及 GN 配置匹配的成功构建时使用 `-F`。源码、rebase 或依赖变化后的首次验证重新构建。
@@ -223,7 +223,7 @@ python3 ecmascript/arksteed/test/run_arksteed_tests.py \
 - 同一 checkout/产物的不同构建配置顺序执行；同一配置成功构建后，内部/external 功能测试可按[全量功能测试指南](references/full-functional-tests.md)共用只读产物并行运行。已有任务占用时先核对状态，不重复启动或并发切换配置。
 - 优化测试应证明目标方法确实编译、前后行为一致、CFG/代码形态符合预期，以及回退或反优化行为。分配与寄存器改动补充压力和强制 GC 覆盖；生成代码注释不能替代运行时路径命中证据。
 - 默认验证受支持的普通 GC 路径，不默认增加 CMC 专项。用户明确要求或项目及环境已确认支持时，再增加 CMC 专项；未运行单独注明。
-- 记录源码版本、命令、退出码、用例数量和持久 run/command、原始结果及日志路径。验证通过后，无新改动或证据不重复扩大检查。
+- 记录源码版本、命令、退出码、可确认的用例数量、持久 run/command 记录，以及原始结果和日志的实际路径；缺失内容注明。验证通过后，无新改动或证据不重复扩大检查。
 
 开发阶段的聚焦验证与提 PR 是独立流程。仅要求提 PR 或准备合入时，不额外运行或补齐测试；PR 模板中的测试项也不构成执行测试的授权。只有用户明确要求全量功能测试时，才读取并执行[全量功能测试指南](references/full-functional-tests.md)。
 
