@@ -208,7 +208,7 @@ python3 "$history_runner" --repo "$runtime_root" --command '
 不假定 action 存在某个结果目录参数，也不把 GTest 可执行文件支持的参数直接当作 action 支持的参数。判定通过需确认本轮测试实际执行、覆盖请求范围且失败能正确传递到入口退出码；可使用 action 的执行记录、成功摘要和退出码，不要求成功用例的完整日志。只有增量构建无工作时，不能记为测试通过；无依据的用例数量标为未知。
 
 - `arksteed_host_unittest` 是 `ecmascript/arksteed/unittests/BUILD.gn` 中的分组，不包含其他模块或 JS/TS 用例。聚焦单个测试目标时，将分组名替换为对应的 `*Action`，例如 `ArkSteedRegisterAllocatorTestAction`。
-- GN 参数中显式保留 `ets_runtime_enable_ark_steed=true`；当前默认关闭，目标不会自动开启，不为省略参数而修改 `ark.py` 或全局默认值。
+- 测试前核对最终 GN 配置中的 `ets_runtime_enable_ark_steed=true`。默认值以当前 checkout 的 `js_runtime_config.gni` 为准：非 ArkUI-X 的 x64/ARM64 配置默认开启，但可能被显式参数覆盖。示例保留 `--gn-args=ets_runtime_enable_ark_steed=true` 是为固定测试配置，不表示该功能默认关闭；无需修改 `ark.py` 或全局默认值。
 - 新增原生测试沿用 `host_unittest_action` 和 GTest，注册到该分组；由 GN/Ninja 管理源码依赖，不另写读取编译数据库或复用链接响应文件的专用脚本。
 - `*Action` 用于宿主机或已配置的 QEMU 执行；不带 `Action` 的目标是目标平台测试程序，不代表已部署或已在手机运行。手机端测试须另行核对设备侧分组、构建和部署入口；当前尚未接入 ArkSteed 手机端聚合分组。
 - unittest 验证编译器内部约束，不能代替 JS/TS 的真实机器码、对象初始化、GC 或反优化行为验证。按改动风险选择互补覆盖，并分别记录结果；构建或运行中断不算通过。

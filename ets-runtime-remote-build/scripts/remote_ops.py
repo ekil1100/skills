@@ -169,7 +169,13 @@ def execute_recorded(root, directory, text, metadata, qemu=False):
         setup = ('cd -- "$1" || exit;\n'
                  'export ARK_RUN_DIR="$2" ARK_RESULTS_DIR="$2/results" TMPDIR="$2/results/tmp"\n')
         if qemu:
-            setup += 'command -v qemu-aarch64-static || exit 127\n'
+            setup += (
+                'ark_qemu_binary=$(command -v qemu-aarch64-static || command -v qemu-aarch64) || {\n'
+                '  printf "%s\\n" "Error: qemu-aarch64-static or qemu-aarch64 is required." >&2\n'
+                '  exit 127\n'
+                '}\n'
+                'printf "QEMU preflight: %s\\n" "$ark_qemu_binary"\n'
+                '"$ark_qemu_binary" --version || exit $?\n')
         errors = []
         finished = threading.Event()
         def stream():

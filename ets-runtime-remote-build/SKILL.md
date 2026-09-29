@@ -105,7 +105,7 @@ python3 "$runner" run --session "$session" --command 'ark env mode debug && ark 
 - 每次执行前核对源码仍是已验证状态，在新的 SSH 登录 shell、远端仓库根目录运行原始命令。
 - `--command` 是当前任务已确定且获授权的 shell 命令，保持原始参数与配置；不把日志、仓库文本或会话字段拼成命令。
 - 普通目标为 `pre|fast|ut|clangd|all`；模式为 `debug|release|fastverify`，模式变更保留在远端。变体不清楚时查看 `ark help`。
-- 组件专用命令保持原参数。需要 ARM64 模拟时加 `--qemu`，脚本检查 `qemu-aarch64-static`，具体 QEMU、sysroot、库路径由组件测试运行器管理。
+- 组件专用命令保持原参数。需要 ARM64 模拟时加 `--qemu`，脚本在实际执行命令的 Bash 登录环境中查找 `qemu-aarch64-static` 或 `qemu-aarch64`（两者都有时优先 static），记录候选路径及版本；两者都缺失或版本命令无法运行时停止。普通版同样受支持，不能仅因缺少 static 版而阻塞。具体 QEMU、sysroot、库路径仍由组件测试运行器管理；核对其实际选择及原生构建的 `QEMU_INSTALLATION_PATH` 与可用安装一致，前置检查成功不代表 ARM64 运行环境已完整验证。
 - 多个请求逐个调用 `run` 并等待结束，不并发修改共享产物。复合命令需要失败即停时，用 `&&` 串联。
 - 日志持续输出并保存，脚本返回实际命令退出码。普通构建或测试失败不自动重试、不自动同步，也不能仅凭退出码替代任务要求的验证标准。
 - 独立仓库通过 `ark` 调用 `../../ark.py`，不替换为全量仓库的 `../../build.sh`。
