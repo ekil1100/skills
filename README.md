@@ -6,6 +6,14 @@ npx skills add ekil1100/skills -g
 
 ---
 
+**vite-plus** - 使用 Vite+ 创建应用或库、迁移现有项目、升级已有 Vite+，保留测试与构建行为，并在验证后逐项清理兼容配置。归属 `like` 插件。
+
+```shell
+npx skills add https://github.com/ekil1100/skills --skill vite-plus -y -g
+```
+
+例如：“将这个项目迁移到 Vite+，保留现有测试和构建行为。”
+
 **wiki-save** - 用 Obsidian CLI 保存讨论结论、总结与决策，遵循目标知识库规范，完成查重、定向写入和回读验证。
 
 ```shell
