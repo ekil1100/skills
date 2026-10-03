@@ -75,3 +75,9 @@ npx skills add https://github.com/ekil1100/skills --skill arksteed -y -g
 ```shell
 npx skills add https://github.com/ekil1100/skills --skill ets-runtime-remote-build -y -g
 ```
+
+**wiki-search** - search and read an Obsidian Wiki with source citations. Requires an available Obsidian CLI; all retrieval is read-only.
+
+```shell
+npx skills add https://github.com/ekil1100/skills --skill wiki-search -y -g
+```

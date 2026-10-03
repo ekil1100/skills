@@ -1,0 +1,61 @@
+{
+  "skill_name": "wiki-search",
+  "evals": [
+    {
+      "id": 0,
+      "prompt": "我们之前为什么选择这个发布方案？去 Wiki 查一下。",
+      "expected_output": "Locate the configured vault, search for the decision, read matching pages and relevant sources, and explain the rationale with exact citations.",
+      "files": [],
+      "expectations": [
+        "The agent verifies CLI availability and the configured vault rather than relying on the active vault.",
+        "The answer is based on page bodies, not search snippets alone.",
+        "The answer cites the vault and exact page paths.",
+        "No notes, logs, metadata, or configuration are changed."
+      ]
+    },
+    {
+      "id": 1,
+      "prompt": "找一下 Wiki 里讲任务命名的页面，只给我路径和一句说明。",
+      "expected_output": "Search titles, aliases, or content as needed, read candidates, and return concise paths and descriptions.",
+      "files": [],
+      "expectations": [
+        "The agent narrows retrieval to relevant pages rather than reading the whole vault.",
+        "Ambiguous titles are disambiguated by exact paths.",
+        "The final answer remains concise and cites only pages actually read."
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "查一下我们记录的部署约定。本机 Obsidian CLI 不可用。",
+      "expected_output": "Skip Wiki access, explain that the recorded conventions could not be checked, and avoid fabricating an answer.",
+      "files": [],
+      "expectations": [
+        "The agent reports unavailable access rather than no search matches.",
+        "The agent does not fall back to searching vault content on disk.",
+        "The agent does not install software, launch Obsidian, or modify configuration."
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Wiki 里两个页面的方案相互矛盾，其中一个在归档目录。现在应该用哪个？",
+      "expected_output": "Read both pages and relevant replacement or source links, distinguish historical and current conclusions, and report any unresolved conflict.",
+      "files": [],
+      "expectations": [
+        "The agent checks status, replacement relationships, and content instead of selecting solely by modification time.",
+        "The agent cites the evidence for the current conclusion or explicitly reports uncertainty.",
+        "The agent does not edit either page to resolve the conflict."
+      ]
+    },
+    {
+      "id": 4,
+      "prompt": "Wiki 里有关于离线检索的记录吗？搜不到就告诉我。",
+      "expected_output": "Search the relevant scope, try useful synonyms or a broader scope if needed, and report bounded search results accurately.",
+      "files": [],
+      "expectations": [
+        "The agent accounts for result limits and output truncation before concluding the search is complete.",
+        "A no-match answer states the searched scope and keywords rather than claiming the record never existed.",
+        "CLI errors are reported as access failures rather than empty search results."
+      ]
+    }
+  ]
+}
