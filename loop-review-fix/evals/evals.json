@@ -9,8 +9,8 @@
       "expectations": [
         "明确用户指定轮数优先，未指定时最多 50 轮",
         "每轮先 review，再只修复有依据的问题",
-        "review 优先由可用 subagent 完成并返回结果",
-        "没有可用 subagent 时回退到当前 agent review",
+        "默认使用 subagent 检视，提供范围、基线和只读要求，等待结果后再修改",
+        "没有可用 subagent 时由当前 agent review",
         "无意见、达到最大轮数或需要用户决策时停止"
       ]
     },
@@ -21,6 +21,8 @@
       "files": [],
       "expectations": [
         "修复前必须检视当前状态、相关文件、diff 和失败输出",
+        "默认使用 subagent 修复，提供已确认的问题、证据和修改范围，等待修复结果",
+        "没有可用 subagent 时由当前 agent 修复",
         "修复只覆盖本轮有依据的问题",
         "保留无关用户改动",
         "修复后运行最窄有用检查，无法运行时说明原因并人工复核",
@@ -38,6 +40,32 @@
         "不应修改代码",
         "最终回复简明说明 review 来源与结果",
         "没有剩余事项时写“无”"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "按现有 findings 修复，最多 1 轮。review 工具报错了，测试环境也启动不了。",
+      "expected_output": "Skill should distinguish incomplete review and unavailable validation from a clean result, and respect the round limit.",
+      "files": [],
+      "expectations": [
+        "review 工具失败时补做检视或报告阻塞，不能按无问题处理",
+        "先核实 findings 是否仍成立，再修复有依据的问题",
+        "如发生修复，在最后一轮仍执行可用验证，标明修复后的复检未完成",
+        "报告测试无法执行的原因和验证缺口，剩余事项不能写无",
+        "实际轮数不超过 1 轮"
+      ]
+    },
+    {
+      "id": 4,
+      "prompt": "review 当前未提交改动并修复。两份 review 对同一问题意见相反，上一轮也没能修好。",
+      "expected_output": "Skill should retain a stable review scope, resolve conflicting findings with evidence, and stop when blocked or stalled.",
+      "files": [],
+      "expectations": [
+        "以当前未提交改动和相关未跟踪文件确定范围并记录基线",
+        "后续复检覆盖原始范围和本次修复",
+        "先核实冲突意见并做最小定向检查，再决定是否修复",
+        "同一问题没有新增证据或有效修复时停止并报告停滞",
+        "保留无关用户改动，范围外发现单独报告"
       ]
     }
   ]
