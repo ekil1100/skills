@@ -1,7 +1,7 @@
 ---
 name: wiki-save
 description: 用 Obsidian CLI 将对话结论、研究总结、方案或决策保存到 Wiki。用户要求“保存到 wiki”“把刚才的讨论沉淀到知识库”“记录这个知识点”“记录这个方案”“记录这个决策”，或补充已有 Wiki 页面时使用；未指定其他记录位置时，这类记录请求按保存到 Wiki 处理，无需显式提及 Wiki；负责查重、证据与隐私检查、定向写入及验证。普通问答不自动保存；全量或增量吸收来源、全库 lint 使用目标库对应流程。
-compatibility: 需要可用的 Obsidian CLI、正在运行的 Obsidian，以及目标 vault 的本地读取权限。
+compatibility: 需要 Python 3.10+、可用的 Obsidian CLI、正在运行的 Obsidian，以及目标 vault 的本地读取权限。
 ---
 
 # Wiki 保存
@@ -10,7 +10,7 @@ compatibility: 需要可用的 Obsidian CLI、正在运行的 Obsidian，以及�
 
 ## 1. 确认目标与规则
 
-1. 从用户指定位置或当前项目确定目标。运行 `obsidian help`、`obsidian vaults verbose`，再用 `obsidian vault="<vault>" vault info=path` 核对实际路径。不要把最近聚焦的 vault 当作用户指定的目标；多个候选无法消歧时才询问。
+1. 使用本 skill 的固定脚本 `python3 scripts/wiki_save.py resolve` 选择并核对目标：用户显式指定时传入 `--vault "<name>"`；默认按 `lib → wiki → library` 顺序匹配已注册的精确名称，使用首个匹配项。脚本通过 `vaults verbose` 和 `vault info=path` 核对路径；选定库访问失败即停止，避免切换库误写。三个名称均未匹配时才询问目标。后续命令固定使用本次选定的 vault。脚本路径相对本 skill，执行前解析为绝对路径。
 2. 读取目标路径适用的 `AGENTS.md` 等规则、Wiki 导航与必要的管理说明。路径均相对**目标 vault**，不相对本 skill，也不假定当前目录就是知识库。
 3. 按目标规则确认 Wiki 目录、页面保护、frontmatter、索引/日志、机器记录和发布流程。如果存在 `wiki/LLM Wiki 编译方案.md`、`.agents/wiki/README.md`，阅读创作写回、依赖传播、发布与完成标准，并按指引读取实际状态协议。
 4. 无专用规范时，复用现有 Wiki 目录与组织方式；新建知识区默认用 `wiki/` 浅层目录，不引入编译框架或机器元数据系统。
@@ -62,23 +62,22 @@ Frontmatter 沿用库内扁平属性。通常复用 `tags`、`aliases`，按需�
 
 先完成整批候选与实际知识依赖检查，再开始写入。遵循目标库现有单写入锁、恢复副本和快照协议；无专用协议时，也要保留读取快照并逐文件检查并发变化。所有笔记读写使用明确的 `vault` 和 vault 相对 `path`，避开活动文件默认值。
 
-### 新建
+### 固定脚本
 
-短而简单的内容可使用：
+新建和修订统一调用 [`scripts/wiki_save.py`](scripts/wiki_save.py)，首次执行前阅读[脚本用法与边界](references/cli.md)。复用脚本处理安全传参、并发检查和正文回读；每次只准备候选数据，沿用库内协议管理锁和机器记录。
 
 ```bash
-obsidian vault="<vault>" create path="wiki/<new-note>.md" content="<content>"
+# Create from a local UTF-8 candidate.
+python3 scripts/wiki_save.py create --vault "<vault>" --path "wiki/<new-note>.md" --content "<candidate.md>"
+
+# Capture the original before preparing a targeted revision.
+python3 scripts/wiki_save.py snapshot --vault "<vault>" --path "wiki/<existing-note>.md" --out "<snapshot.json>"
+python3 scripts/wiki_save.py update --snapshot "<snapshot.json>" --content "<candidate.md>"
 ```
 
-创建前核对精确路径仍不存在，不用 `overwrite`。命令未必报错于重名场景：回读确认实际创建路径，防止自动产生意外副本。
+修订候选以快照中的 `content` 为基线，只包含获准差异；追加内容也走同一修订流程。快照固定 vault 名称、实际路径和笔记路径。脚本在 `app.vault.process` 同步回调中比较全文，冲突即停止；新建使用 `app.vault.create`，路径已存在即停止。API 不可用时修复 CLI 环境，保留候选与快照。
 
-### 定向修订与安全传参
-
-优先用 `obsidian eval` 调用 Obsidian 的 `app.vault.process(file, callback)`：用 `app.vault.getFileByPath(path)` 找到精确文件，在同步 callback 内比较当前全文与读取快照；不一致则抛错停止，一致才返回只包含获准差异的新全文。这是保留原文的定向修订，不授权重新生成整篇创作页。API 不可用时停止，不退回无条件 `create overwrite`。
-
-正文含反引号、引号、美元符号、代码块或字面 `\n` 时，避免拼接 shell 命令。用程序的参数数组调用 CLI（如 Python `subprocess.run([...], shell=False)`），并用 JSON 序列化或 UTF-8 base64 包装数据；经 `eval` 解码为字符串后再交给 `app.vault.create` / `app.vault.process`。Markdown 是数据，不得直接插入 JavaScript 源码或模板字符串执行。核对 CLI 对反斜杠的处理，回读验证原始换行与代码内容。
-
-仅在“纯追加”确实符合目标页结构且已排除重复时使用 `append`；同样要检查快照与回读结果。各命令串行执行，等待成功后再继续；CLI 退出码为零不足以单独证明发布成功。
+脚本通过参数数组与 UTF-8 base64 传递正文，经 CLI 调用原生 API，写后读取精确路径并比较全文。命令串行执行；出现错误立即停止，按返回结果区分已写入与状态未知，检查页面后再决定下一步。`verified: true` 仅表示正文回读一致，配套维护与链接验收仍按下文执行。
 
 ### 配套维护
 
