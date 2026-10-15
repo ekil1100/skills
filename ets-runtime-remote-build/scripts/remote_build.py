@@ -80,7 +80,8 @@ class Remote:
         self.token = uuid.uuid4().hex
 
     def request(self, action, **kwargs):
-        request = {'action': action, 'relative': self.state['relative'],
+        request = {'action': action,
+                   'relative': self.state.get('remote_relative', self.state['relative']),
                    'token': self.token, 'run_id': self.state['run_id'],
                    'baseline': self.state['local']['head'], **kwargs}
         # Send the versioned worker directly, without generating or installing scripts.
@@ -223,6 +224,7 @@ def prepare(args):
     print('Session: ' + str(directory), flush=True)
     state = {'version': 2, 'kind': 'remote-session', 'run_id': directory.name,
              'phase': 'preparing', 'root': str(root), 'relative': relative,
+             'remote_relative': args.remote_relative if args.remote_relative is not None else relative,
              'host': socket.gethostname(), 'started_at': ops.timestamp(),
              'source': baseline, 'stashes': [], 'commands': [], 'ark_sync': 'skipped'}
     save(directory, state)
@@ -410,6 +412,7 @@ def main():
     subs = parser.add_subparsers(dest='action', required=True)
     prep = subs.add_parser('prepare', help='Stash/align remote source and produce a reviewable preview')
     prep.add_argument('--repo', required=True)
+    prep.add_argument('--remote-relative', help='Destination repository relative to remote HOME; validated on work')
     subs.add_parser('archive-history', help='Copy completed legacy cache sessions into verified persistent archives')
     for action in ('apply', 'run'):
         sub = subs.add_parser(action)

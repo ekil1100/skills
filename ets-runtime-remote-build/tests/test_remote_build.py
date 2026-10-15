@@ -227,6 +227,35 @@ class RemoteBuildIntegrationTests(unittest.TestCase):
         self.assertFalse((session / "files.nul").exists())
         self.assert_run_blocked(session)
 
+    def test_explicit_remote_relative_persists_through_apply_and_run(self):
+        destination = self.remote_home / 'ohos/a2/arkcompiler/ets_runtime'
+        destination.parent.mkdir(parents=True)
+        self.checked([TOOLS['git'], 'clone', '--no-local', str(self.local), str(destination)])
+        self.put(self.local, 'source.txt', 'changed\n')
+        result = self.invoke([sys.executable, RUNNER, 'prepare', '--repo', self.local,
+                              '--remote-relative', 'ohos/a2/arkcompiler/ets_runtime'])
+        self.assertEqual(result.returncode, 0, self.diagnostic(result))
+        session = Path(next(line.removeprefix('Session: ') for line in result.stdout.splitlines()
+                            if line.startswith('Session: ')))
+        self.assertEqual(self.state(session)['relative'], self.relative.as_posix())
+        self.assertEqual(self.state(session)['remote_root'], str(destination))
+        self.apply(session)
+        result = self.cli('run', session=session, command='ark build')
+        self.assertEqual(result.returncode, 0, self.diagnostic(result))
+        self.assertEqual(self.records(self.ark_log)[0]['cwd'], str(destination))
+        self.assertEqual((destination / 'source.txt').read_text(), 'changed\n')
+        self.assertEqual((self.remote / 'source.txt').read_text(), 'baseline\n')
+
+    def test_explicit_remote_relative_rejects_unsafe_destinations(self):
+        symlink = self.remote_home / 'linked'
+        symlink.symlink_to(self.remote.parent, target_is_directory=True)
+        for destination in ('/tmp/ets_runtime', '../ets_runtime', 'linked/ets_runtime'):
+            with self.subTest(destination=destination):
+                result = self.invoke([sys.executable, RUNNER, 'prepare', '--repo', self.local,
+                                      '--remote-relative', destination])
+                self.assertNotEqual(result.returncode, 0, self.diagnostic(result))
+        self.assertEqual(self.git(self.remote, 'status', '--porcelain'), '')
+
     def test_persistent_layout_and_command_histories_do_not_overwrite(self):
         session = self.prepare()
         self.assertTrue(session.is_relative_to(self.home / '.local/state/ark-runtime/runs'))

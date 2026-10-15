@@ -18,7 +18,8 @@ description: "开发 OpenHarmony arkcompiler/ets_runtime，准备构建或运行
 - 两端需要 Python 3.9+、Git、rsync，远端使用 Bash 登录环境，并提供 `ark` 包装命令；本地需要 SSH。
 - 将本 skill 目录下的 `scripts/remote_build.py` 解析成绝对路径，下文用 `$runner` 表示。脚本自动加载同目录的固定远端程序 `remote_ops.py`，通过 SSH 直接执行，不在远端安装或生成程序。
 - 用 `git rev-parse --show-toplevel` 获取本地仓库根目录 `$local_root`。它必须是 `$HOME` 下名为 `ets_runtime` 的仓库，路径父级不能是符号链接。
-- 远端路径是远端 `$HOME` 加相同相对路径。例如本地 `$HOME/ohos/a0/arkcompiler/ets_runtime` 映射到 `work` 的 `$HOME/ohos/a0/arkcompiler/ets_runtime`。
+- 默认按相对各自 `$HOME` 的相同目录映射。例如本地 `$HOME/ohos/a0/arkcompiler/ets_runtime` 映射到 `work` 的 `$HOME/ohos/a0/arkcompiler/ets_runtime`。
+- 用户指定远端目录时，在 prepare 中用 `--remote-relative` 传入该目录相对远端 `$HOME` 的路径；用户提供绝对路径时，先核实远端 `$HOME` 再转换。目标须为远端 `$HOME` 下已存在、名为 `ets_runtime` 的 Git 仓库根目录，路径及父级均须通过脚本的符号链接检查。映射保存在会话中，后续 apply/run 沿用该目录；指定路径无效时停止并说明原因。
 - 仓库操作期间不要由其他任务修改两端源码。脚本锁只能约束同脚本任务，不能阻止编辑器或其他 Git 命令；检查与写入也不是原子事务。
 
 ## 持久运行历史
@@ -48,6 +49,12 @@ python3 "$runner" archive-history
 
 ```bash
 python3 "$runner" prepare --repo "$local_root"
+```
+
+用户指定目标为远端 `$HOME/ohos/a2/arkcompiler/ets_runtime` 时：
+
+```bash
+python3 "$runner" prepare --repo "$local_root" --remote-relative 'ohos/a2/arkcompiler/ets_runtime'
 ```
 
 **此命令会修改远端 Git 状态，但不会镜像源码或启动构建。** 它会：
