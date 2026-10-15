@@ -33,7 +33,7 @@ ArkSteed 是基于 CFG 的 JIT：`Graph` 包含基本块 `BB`，基本块包含�
 
 ## 修改范围
 
-- ArkSteed 优化默认限于 `ecmascript/arksteed/**`；JS/TS 功能用例放在 `test/`，原生 C++/GTest 单元测试放在 `unittests/`，两类测试分开维护。
+- ArkSteed 优化默认限于 `ecmascript/arksteed/**`；新增 JS/TS 功能用例直接放在 `ecmascript/arksteed/test/` 下；原生 C++/GTest 单元测试放在 `ecmascript/arksteed/unittests/`，两类测试分开维护。
 - 优化项对比、方案、实现讲解和验证结果统一保存在独立文档仓库 `~/ohos/ark-dev-notes/arksteed/<topic>.md` 中，不扩大运行时代码的可修改范围。
 - 共享编译器、解释器和运行时代码用于对照语义与 ABI，不因复用方便而修改。
 - 只有局部 CFG、lowering、元数据或代码生成方案不足时，才考虑修改范围外的代码；修改前说明原因和影响。构建注册、优化必需的 PGO 采集/反馈链路补充，或确实共享的 ABI/运行时缺陷可以构成理由。
@@ -226,7 +226,7 @@ python3 "$history_runner" --repo "$runtime_root" --command '
 
 #### JS/TS 功能测试
 
-开发阶段默认只构建和验证 **x64 Debug**，包括架构敏感改动。JS/TS runner 默认启用 ArkSteed。选择聚焦用例；`-I` 是相对测试根目录的路径，如 `jittest/createemptyarray_inline_allocation`。先按[输出接口检查](references/full-functional-tests.md#输出接口检查)核对当前 runner 的产物路径及可配置方式；以下只展示用例选择参数，不预设结果目录参数存在。
+开发阶段默认只构建和验证 **x64 Debug**，包括架构敏感改动。JS/TS runner 默认启用 ArkSteed。选择聚焦用例；`-I` 是相对 `ecmascript/arksteed/test/` 的用例或目录路径，按当前 runner 的接口填写。先按[输出接口检查](references/full-functional-tests.md#输出接口检查)核对当前 runner 的产物路径及可配置方式；以下只展示用例选择参数，不预设结果目录参数存在。
 
 ```text
 python3 ecmascript/arksteed/test/run_arksteed_tests.py \
