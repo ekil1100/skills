@@ -185,12 +185,23 @@ git log -n 10 --oneline -- ecmascript/arksteed
 
 按测试入口选择：内部 JS/TS 测试阅读 `ecmascript/arksteed/test/README.md`，按 runner 的接口和注解选择用例；原生 unittest 阅读 `ecmascript/arksteed/unittests/README.md` 与 `BUILD.gn`，使用现有 GTest/GN 目标。两种入口均负责构建所需依赖，无需先重复单独构建；只运行与任务相关的测试类型，不自动扩大为整个运行时的单测或全量功能测试。
 
+#### 增量构建的 stub 复用规则
+
+每次构建前，检查相对上次成功生成 stub 的累计改动及当前产物：
+
+- **已有与当前架构、模式及配置匹配的 stub 产物，且累计改动不影响 stub 时，默认添加 `--gn-args=skip_gen_stub=true`，跳过 stub 生成。** ArkSteed 内部优化、寄存器分配和代码生成的局部修改通常适用；仍需编译修改后的 C++ 代码。
+- 首次构建、产物缺失、切换架构/模式或影响 stub 的配置，以及修改 stub 实现、共享编译后端、对象布局、调用约定、stub ID 或运行时偏移时，显式使用 `--gn-args=skip_gen_stub=false`。合并或 rebase 后同样检查累计改动；兼容性无法确认时重新生成。
+- 此规则适用于直接构建、原生 unittest 和 JS/TS runner。runner 支持 `--skip-stub` 时使用该参数；执行前核对当前 checkout 的参数定义。该选项跳过 `stub.an` 生成，生成器自身的依赖编译和链接仍可能执行。
+- 记录本次是否复用 stub 及判断依据。跳过 stub 生成与跳过整个构建分别判断；代码修改后仍执行增量构建。
+
+下面的构建和原生 unittest 示例适用于满足上述复用条件的增量验证；需要生成 stub 时将 `skip_gen_stub=true` 改为 `skip_gen_stub=false`。
+
 仅需构建 x64 Debug 时，由记录器从启动起保存完整控制台；`ark.py` 在 `out` 中的附带日志不作为历史入口：
 
 ```bash
 python3 "$history_runner" --repo "$runtime_root" --command '
   cd ../.. && python3 ark.py x64.debug \
-    --gn-args=ets_runtime_enable_ark_steed=true
+    --gn-args=skip_gen_stub=true
 '
 ```
 
@@ -202,13 +213,13 @@ python3 "$history_runner" --repo "$runtime_root" --command '
 
 ```text
 (cd ../.. && python3 ark.py x64.debug arksteed_host_unittest \
-  --gn-args=ets_runtime_enable_ark_steed=true)
+  --gn-args=skip_gen_stub=true)
 ```
 
 不假定 action 存在某个结果目录参数，也不把 GTest 可执行文件支持的参数直接当作 action 支持的参数。判定通过需确认本轮测试实际执行、覆盖请求范围且失败能正确传递到入口退出码；可使用 action 的执行记录、成功摘要和退出码，不要求成功用例的完整日志。只有增量构建无工作时，不能记为测试通过；无依据的用例数量标为未知。
 
 - `arksteed_host_unittest` 是 `ecmascript/arksteed/unittests/BUILD.gn` 中的分组，不包含其他模块或 JS/TS 用例。聚焦单个测试目标时，将分组名替换为对应的 `*Action`，例如 `ArkSteedRegisterAllocatorTestAction`。
-- 测试前核对最终 GN 配置中的 `ets_runtime_enable_ark_steed=true`。默认值以当前 checkout 的 `js_runtime_config.gni` 为准：非 ArkUI-X 的 x64/ARM64 配置默认开启，但可能被显式参数覆盖。示例保留 `--gn-args=ets_runtime_enable_ark_steed=true` 是为固定测试配置，不表示该功能默认关闭；无需修改 `ark.py` 或全局默认值。
+- ArkSteed 在非 ArkUI-X 的 x64/ARM64 配置中默认开启，构建和测试命令沿用默认值，省略 `--gn-args=ets_runtime_enable_ark_steed=true`。测试前核对最终 GN 配置，确认没有显式关闭 ArkSteed；默认值以当前 checkout 的 `js_runtime_config.gni` 为准。
 - 新增原生测试沿用 `host_unittest_action` 和 GTest，注册到该分组；由 GN/Ninja 管理源码依赖，不另写读取编译数据库或复用链接响应文件的专用脚本。
 - `*Action` 用于宿主机或已配置的 QEMU 执行；不带 `Action` 的目标是目标平台测试程序，不代表已部署或已在手机运行。手机端测试须另行核对设备侧分组、构建和部署入口；当前尚未接入 ArkSteed 手机端聚合分组。
 - unittest 验证编译器内部约束，不能代替 JS/TS 的真实机器码、对象初始化、GC 或反优化行为验证。按改动风险选择互补覆盖，并分别记录结果；构建或运行中断不算通过。
@@ -222,7 +233,7 @@ python3 ecmascript/arksteed/test/run_arksteed_tests.py \
   -p x64 -m debug -I '<case-or-directory>' -s -v
 ```
 
-将上述命令交给记录器执行；有已核实的输出配置时可按需使用，没有时沿用 runner 默认路径并记录，包括硬编码的 `/tmp`，不因此阻塞或修改 runner。ARM64/QEMU 仅在用户明确要求时，将上述 `-p x64` 替换为 `-p arm64`，并按实际配置核对构建与执行环境。
+满足本节 stub 复用条件时，在上述 runner 命令追加已核实支持的 `--skip-stub`；需要生成 stub 时使用 runner 的正常生成路径，并核对最终 `skip_gen_stub=false`。将最终命令交给记录器执行；有已核实的输出配置时可按需使用，没有时沿用 runner 默认路径并记录，包括硬编码的 `/tmp`，不因此阻塞或修改 runner。ARM64/QEMU 仅在用户明确要求时，将上述 `-p x64` 替换为 `-p arm64`，并按实际配置核对构建与执行环境。
 
 - 只执行任务需要且用户授权的配置；未运行项标为未验证。
 - 仅当已有与当前源码、依赖、架构、模式及 GN 配置匹配的成功构建时使用 `-F`。源码、rebase 或依赖变化后的首次验证重新构建。
