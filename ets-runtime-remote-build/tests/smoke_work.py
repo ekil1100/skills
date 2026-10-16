@@ -49,12 +49,17 @@ def setup(root, remote=False):
                             stderr=subprocess.PIPE)
     git(root, 'update-ref', 'refs/heads/master', result.stdout.strip(), '0' * 40)
     if remote:
-        put(root, 'source.txt', 'remote work to stash\n')
+        put(root, 'source.txt', 'existing saved work\n')
+        git(root, 'stash', 'push', '-m', 'Existing smoke stash')
+        put(root, 'source.txt', 'remote staged work\n')
+        git(root, 'add', 'source.txt')
+        put(root, 'source.txt', 'remote work to discard\n')
         put(root, 'remote notes.txt', 'remote untracked work\n')
         put(root, 'out/preserved.bin', 'remote artifact\n')
         put(root, '.pi/settings.json', 'remote metadata\n')
         put(root, '.git/smoke-marker', 'remote git metadata\n')
-    return {'root': str(root), 'head': git(root, 'rev-parse', 'HEAD')}
+    return {'root': str(root), 'head': git(root, 'rev-parse', 'HEAD'),
+            'existing_stashes': git(root, 'stash', 'list', '--format=%H')}
 
 
 def remote_action(request):
@@ -80,11 +85,10 @@ def remote_action(request):
         check((root / name).read_text() == content, f'Unexpected remote contents: {name!r}')
     for name in ('staged-delete.txt', 'unstaged-delete.txt', 'remote notes.txt', 'out/local.bin'):
         check(not (root / name).exists(), f'Unexpected remote path: {name!r}')
-    saved = request['stash']
-    check(git(root, 'stash', 'list', '--format=%H') == saved, 'Saved stash was changed.')
-    check(git(root, 'show', saved + ':source.txt') == 'remote work to stash', 'Stash lost tracked work.')
-    check(git(root, 'show', saved + '^3:remote notes.txt') == 'remote untracked work',
-          'Stash lost untracked work.')
+    saved = request['existing_stashes']
+    check(git(root, 'stash', 'list', '--format=%H') == saved, 'Existing stashes changed.')
+    check(git(root, 'show', saved + ':source.txt') == 'existing saved work',
+          'Existing stash content changed.')
     directory = Path(request['command_dir'])
     check((directory / 'results/smoke-result.txt').read_text() == 'smoke-ok\n', 'Missing durable result.')
     record = json.loads((directory / 'run.json').read_text())
@@ -93,7 +97,7 @@ def remote_action(request):
           'Missing durable command log.')
     check((directory / 'summary.md').is_file(), 'Missing durable summary.')
     return {'root': str(root), 'head': git(root, 'rev-parse', 'HEAD'),
-            'stash': saved, 'status': git(root, 'status', '--short'),
+            'existing_stashes': saved, 'status': git(root, 'status', '--short'),
             'artifact': str(directory / 'results/smoke-result.txt')}
 
 
@@ -159,7 +163,7 @@ def smoke():
           'Unexpected fixture preview: ' + repr(reviewed))
     check({name for name, item in reviewed.items() if item.startswith('*deleting')}
           == {'staged-delete.txt', 'unstaged-delete.txt'}, 'Unexpected deletion set.')
-    saved = state['stashes'][0]['stash']['id']
+    check(state['discards'][0]['phase'] == 'completed', 'Discard was not recorded.')
     print('Reviewed expected source changes and two deletions.', flush=True)
     invoke(runner, 'apply', '--session', str(session))
     invoke(runner, 'run', '--session', str(session), '--command',
@@ -171,13 +175,13 @@ def smoke():
     check(final['phase'] == 'applied', 'Command failure invalidated the source mirror.')
     check([entry['exit_code'] for entry in final['commands']] == [0, 7], 'Wrong command results.')
     check(final['ark_sync'] == 'skipped', 'Unexpected automatic dependency sync.')
-    verification = remote('verify', relative, head=local['head'], stash=saved,
+    verification = remote('verify', relative, head=local['head'], existing_stashes=distant['existing_stashes'],
                           command_dir=final['commands'][0]['remote_command_dir'])
     report = {'result': 'passed', 'local_fixture': str(root), 'session': str(session),
               **verification, 'command_exit_codes': [0, 7], 'ark_sync': 'skipped'}
     (session / 'results/smoke-report.json').write_text(json.dumps(report, indent=2) + '\n')
     print(json.dumps(report, indent=2), flush=True)
-    print('Smoke passed. Isolated fixtures, stash and logs are retained for inspection.', flush=True)
+    print('Smoke passed. Isolated fixtures, existing stashes and logs are retained for inspection.', flush=True)
 
 
 if __name__ == '__main__':

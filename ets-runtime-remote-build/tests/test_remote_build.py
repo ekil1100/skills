@@ -441,7 +441,7 @@ class RemoteBuildIntegrationTests(unittest.TestCase):
         self.assertEqual(state["remote_root"], str(self.remote))
         self.assertEqual(state["original"]["info"]["head"], self.head)
         self.assertEqual(state["aligned"]["branch"], "master")
-        self.assertIsNone(state["stashes"][0]["stash"])
+        self.assertFalse(state["discards"][0]["changed"])
         listing = (session / "files.nul").read_bytes().split(b"\0")
         for name in ("new space\nline.txt", "delete space\nline.txt", "staged-delete.txt",
                      "unstaged-delete.txt", "source.txt"):
@@ -488,10 +488,13 @@ class RemoteBuildIntegrationTests(unittest.TestCase):
         self.assertEqual(self.git(self.remote, "rev-parse", "HEAD").strip(), self.head)
         self.assertFalse(Path(self.state(session)["remote_lock"]).exists())
 
-    def test_remote_stashes_are_retained_and_never_restored(self):
+    def test_discard_preserves_existing_stashes_and_ignored_artifacts(self):
         self.put(self.remote, "source.txt", "older saved work\n")
         self.git(self.remote, "stash", "push", "-m", "Pre-existing stash")
         older = self.git(self.remote, "rev-parse", "refs/stash").strip()
+        reflog = self.git(self.remote, "reflog", "show", "refs/stash")
+        self.put(self.remote, "remote-added.txt", "staged addition\n")
+        self.git(self.remote, "add", "remote-added.txt")
         self.put(self.remote, "source.txt", "remote staged work\n")
         self.git(self.remote, "add", "source.txt")
         self.put(self.remote, "source.txt", "remote unstaged work\n")
@@ -499,28 +502,29 @@ class RemoteBuildIntegrationTests(unittest.TestCase):
         self.put(self.remote, "out/keep.bin", "ignored artifact\n")
         self.put(self.local, "source.txt", "local replacement\n")
         session = self.prepare()
-        stash = self.state(session)["stashes"][0]
-        saved = stash["stash"]["id"]
-        self.assertEqual(len(saved), len(self.head))
-        self.assertNotEqual(saved, older)
-        self.assertEqual(stash["before"]["branch"], "master")
-        self.assertEqual(stash["before"]["head"], self.head)
-        self.assertIn("Saved stash (not restored)", (session / "logs/remote.log").read_text())
-        self.assertEqual(self.git(self.remote, "show", saved + ":source.txt"), "remote unstaged work\n")
-        self.assertEqual(self.git(self.remote, "show", saved + "^2:source.txt"), "remote staged work\n")
-        self.assertEqual(self.git(self.remote, "show", saved + "^3:remote new\nfile.txt"),
-                         "remote untracked work\n")
+        discard = self.state(session)["discards"][0]
+        self.assertEqual(discard["phase"], "completed")
+        remote_record = json.loads((Path(self.state(session)['remote_history']) / 'run.json').read_text())
+        self.assertEqual(remote_record['discards'], [discard])
+        self.assertNotIn('stashes', self.state(session))
+        self.assertEqual(discard["before"]["branch"], "master")
+        self.assertEqual(discard["before"]["head"], self.head)
+        self.assertIn("Discard result:", (session / "logs/remote.log").read_text())
+        self.assertEqual((self.remote / "source.txt").read_text(), "baseline\n")
+        self.assertFalse((self.remote / "remote new\nfile.txt").exists())
+        self.assertFalse((self.remote / "remote-added.txt").exists())
         self.assertEqual(self.git(self.remote, "status", "--porcelain"), "")
         self.apply(session)
         result = self.cli("run", session=session, command="ark build")
         self.assertEqual(result.returncode, 0, self.diagnostic(result))
         self.assertEqual(self.git(self.remote, "stash", "list", "--format=%H").splitlines(),
-                         [saved, older])
+                         [older])
+        self.assertEqual(self.git(self.remote, "reflog", "show", "refs/stash"), reflog)
         self.assertEqual((self.remote / "source.txt").read_text(), "local replacement\n")
         self.assertFalse((self.remote / "remote new\nfile.txt").exists())
         self.assertEqual((self.remote / "out/keep.bin").read_text(), "ignored artifact\n")
 
-    def test_stash_is_retained_when_prepare_later_fails(self):
+    def test_discard_is_recorded_when_prepare_later_fails(self):
         self.put(self.remote, "source.txt", "remote work to retain\n")
         self.put(self.remote, "remote-untracked.txt", "untracked work to retain\n")
         self.put(self.remote, ".git/info/exclude", "/collision.txt\n")
@@ -529,16 +533,12 @@ class RemoteBuildIntegrationTests(unittest.TestCase):
         session = self.prepare(succeeds=False, error="Remote ignored destination conflict")
         state = self.state(session)
         self.assertEqual(state["phase"], "failed")
-        saved = state["stashes"][0]["stash"]["id"]
-        self.assertEqual(self.git(self.remote, "rev-parse", "refs/stash").strip(), saved)
-        self.assertEqual(self.git(self.remote, "show", saved + ":source.txt"),
-                         "remote work to retain\n")
-        self.assertEqual(self.git(self.remote, "show", saved + "^3:remote-untracked.txt"),
-                         "untracked work to retain\n")
+        self.assertEqual(state["discards"][0]["phase"], "completed")
+        self.assertEqual(self.git(self.remote, "stash", "list"), "")
         self.assertEqual((self.remote / "source.txt").read_text(), "baseline\n")
         self.assertFalse((self.remote / "remote-untracked.txt").exists())
         self.assertEqual((self.remote / "collision.txt").read_text(), "ignored destination\n")
-        self.assertIn(saved, (session / "logs/remote.log").read_text())
+        self.assertIn("Discard result:", (session / "logs/remote.log").read_text())
         self.assertFalse(Path(state["remote_lock"]).exists())
         self.assert_run_blocked(session)
 
@@ -613,6 +613,80 @@ class RemoteBuildIntegrationTests(unittest.TestCase):
         self.assertEqual((self.remote / "source.txt").read_text(), "new committed baseline\n")
         self.apply(session)
 
+    def test_alignment_rejects_protected_tree_changes(self):
+        upstream = self.home / 'upstream.git'
+        self.checked([TOOLS['git'], 'clone', '--bare', str(self.local), str(upstream)])
+        self.git(self.local, 'remote', 'add', 'origin', str(upstream))
+        self.git(self.remote, 'remote', 'set-url', 'origin', str(upstream))
+        for change in ('content', 'add', 'delete', 'mode', 'file-to-directory',
+                       'directory-to-file'):
+            with self.subTest(change=change):
+                # Each pair of commits starts with the same protected tree.
+                if (self.local / '.pi').is_dir():
+                    shutil.rmtree(self.local / '.pi')
+                elif (self.local / '.pi').exists():
+                    (self.local / '.pi').unlink()
+                if change == 'file-to-directory':
+                    self.put(self.local, '.pi', 'old metadata\n')
+                elif change != 'add':
+                    self.put(self.local, '.pi/settings', 'old metadata\n')
+                self.git(self.local, 'add', '-f', '-A', '--', '.pi')
+                self.git(self.local, 'commit', '--allow-empty', '-m', 'Old protected tree')
+                self.git(self.local, 'push', '-u', 'origin', 'master')
+                old = self.git(self.local, 'rev-parse', 'HEAD').strip()
+                self.git(self.remote, 'fetch', 'origin')
+                self.git(self.remote, 'switch', '--detach', old)
+                before = self.git(self.remote, 'ls-files', '--stage', '-z')
+                path = '.pi' if change == 'file-to-directory' else '.pi/settings'
+                old_mode = (self.remote / path).stat().st_mode if change != 'add' else None
+                if change in ('content', 'add'):
+                    self.put(self.local, '.pi/settings', 'new metadata\n')
+                elif change == 'delete':
+                    (self.local / '.pi/settings').unlink()
+                elif change == 'mode':
+                    (self.local / '.pi/settings').chmod(0o755)
+                elif change == 'file-to-directory':
+                    (self.local / '.pi').unlink()
+                    self.put(self.local, '.pi/settings', 'new metadata\n')
+                else:
+                    shutil.rmtree(self.local / '.pi')
+                    self.put(self.local, '.pi', 'new metadata\n')
+                self.git(self.local, 'add', '-f', '-A', '--', '.pi')
+                self.git(self.local, 'commit', '-m', 'Changed protected tree')
+                self.git(self.local, 'push', 'origin', 'master')
+                self.prepare(succeeds=False, error='Target commit changes protected metadata')
+                self.assertEqual(self.git(self.remote, 'rev-parse', 'HEAD').strip(), old)
+                self.assertEqual(self.git(self.remote, 'ls-files', '--stage', '-z'), before)
+                self.assertEqual(self.git(self.remote, 'status', '--porcelain'), '')
+                if change == 'add':
+                    self.assertFalse((self.remote / '.pi').exists())
+                else:
+                    self.assertEqual((self.remote / path).read_text(), 'old metadata\n')
+                    self.assertEqual((self.remote / path).stat().st_mode, old_mode)
+
+    def test_alignment_preserves_unchanged_protected_tree(self):
+        for name in PROTECTED:
+            path = name if name == 'CLAUDE.local.md' else name + '/settings'
+            self.put(self.local, path, 'protected metadata\n')
+        self.git(self.local, 'add', '-f', '--', *PROTECTED)
+        self.git(self.local, 'commit', '-m', 'Protected tree')
+        self.git(self.remote, 'fetch', 'origin')
+        self.git(self.remote, 'switch', '--detach', 'FETCH_HEAD')
+        upstream = self.home / 'upstream.git'
+        self.checked([TOOLS['git'], 'clone', '--bare', str(self.local), str(upstream)])
+        self.git(self.local, 'remote', 'add', 'origin', str(upstream))
+        self.git(self.remote, 'remote', 'set-url', 'origin', str(upstream))
+        self.put(self.local, 'CLAUDE-local.md', 'ordinary source\n')
+        self.git(self.local, 'add', 'CLAUDE-local.md')
+        self.git(self.local, 'commit', '-m', 'Ordinary source change')
+        self.git(self.local, 'push', '-u', 'origin', 'master')
+        session = self.prepare()
+        self.apply(session)
+        self.assertEqual((self.remote / 'CLAUDE-local.md').read_text(), 'ordinary source\n')
+        for name in PROTECTED:
+            path = name if name == 'CLAUDE.local.md' else name + '/settings'
+            self.assertEqual((self.remote / path).read_text(), 'protected metadata\n')
+
     def test_submodule_index_entry_is_rejected_without_remote_access(self):
         self.git(self.local, "update-index", "--add", "--cacheinfo",
                  "160000," + self.head + ",submodule")
@@ -648,16 +722,16 @@ class RemoteBuildIntegrationTests(unittest.TestCase):
         self.assertEqual((outside / "nested.txt").read_text(), "outside sentinel\n")
         self.assertTrue((self.remote / "src").is_symlink())
 
-    def test_remote_repository_parent_symlink_is_rejected_before_stash(self):
+    def test_remote_repository_parent_symlink_is_rejected_before_discard(self):
         parent = self.remote.parent
         moved = self.remote_home / "moved-arkcompiler"
         parent.rename(moved)
         parent.symlink_to(moved, target_is_directory=True)
         actual = moved / "ets_runtime"
-        self.put(actual, "source.txt", "must not stash\n")
+        self.put(actual, "source.txt", "must not discard\n")
         self.prepare(succeeds=False, error="Unsafe path parent")
         self.assertEqual(self.git(actual, "stash", "list"), "")
-        self.assertEqual((actual / "source.txt").read_text(), "must not stash\n")
+        self.assertEqual((actual / "source.txt").read_text(), "must not discard\n")
 
     def test_directory_replacing_local_file_is_rejected(self):
         (self.local / "source.txt").unlink()
@@ -709,7 +783,7 @@ class RemoteBuildIntegrationTests(unittest.TestCase):
         self.assertIn('Run requires a successfully applied session', again.stderr)
         self.assertEqual(len(self.state(session)['commands']), 1)
 
-    def test_remote_lock_blocks_prepare_without_stashing(self):
+    def test_remote_lock_blocks_prepare_without_discarding(self):
         self.put(self.remote, 'source.txt', 'concurrent work\n')
         env = dict(self.env, HOME=str(self.remote_home))
         request = {'relative': self.relative.as_posix(), 'token': 'other-owner',
@@ -738,23 +812,83 @@ class RemoteBuildIntegrationTests(unittest.TestCase):
         self.assertEqual((self.remote / 'source.txt').read_text(), 'baseline\n')
         self.assertEqual(self.records(self.ark_log), [])
 
-    def test_stash_failure_stops_before_mirror_without_touching_remote_work(self):
+    def test_discard_failure_stops_before_mirror_without_touching_remote_work(self):
         self.put(self.remote, 'source.txt', 'remote work\n')
         self.make_executable('git', f'''
             import os
             import sys
-            if sys.argv[1:3] == ['stash', 'push']:
-                sys.stderr.write('Injected stash failure\\n')
+            if sys.argv[1:3] == ['--literal-pathspecs', 'restore']:
+                sys.stderr.write('Injected discard failure\\n')
                 sys.exit(1)
             os.execv({TOOLS['git']!r}, ['git', *sys.argv[1:]])
         ''')
-        session = self.prepare(succeeds=False, error='Injected stash failure')
+        session = self.prepare(succeeds=False, error='Injected discard failure')
         self.assertEqual((self.remote / 'source.txt').read_text(), 'remote work\n')
         self.assertEqual(self.git(self.remote, 'stash', 'list'), '')
         self.assertFalse((session / 'files.nul').exists())
         self.assert_run_blocked(session)
 
-    def test_stash_rejects_ignored_replacement_of_staged_deleted_file(self):
+    def test_discard_prunes_only_newly_emptied_source_parents(self):
+        self.put(self.local, 'new', 'local regular file\n')
+        self.put(self.remote, 'new/deep/leaf.cc', 'discard me\n')
+        self.put(self.remote, 'retained/leaf.cc', 'discard me too\n')
+        self.put(self.remote, 'retained/artifact.bin', 'ignored artifact\n')
+        self.put(self.remote, '.git/info/exclude', '/retained/artifact.bin\n')
+        (self.remote / 'empty-before').mkdir()
+        self.put(self.remote, '.pi/settings', 'protected metadata\n')
+        session = self.prepare()
+        self.assertFalse((self.remote / 'new').exists())
+        self.assertFalse((self.remote / 'retained/leaf.cc').exists())
+        self.assertEqual((self.remote / 'retained/artifact.bin').read_text(), 'ignored artifact\n')
+        self.assertTrue((self.remote / 'empty-before').is_dir())
+        self.assertEqual((self.remote / '.pi/settings').read_text(), 'protected metadata\n')
+        # Repeated prepare must also succeed before the regular file is mirrored.
+        session = self.prepare()
+        self.apply(session)
+        self.assertEqual((self.remote / 'new').read_text(), 'local regular file\n')
+
+    def test_help_explains_direct_discard_without_stash(self):
+        for args in (('--help',), ('prepare', '--help')):
+            with self.subTest(args=args):
+                result = self.invoke([sys.executable, RUNNER, *args])
+                self.assertEqual(result.returncode, 0, self.diagnostic(result))
+                output = ' '.join(result.stdout.split())
+                self.assertIn('Directly discard remote source changes (no stash)', output)
+                self.assertNotIn('Stash/align', output)
+                self.assertEqual(self.records(self.ssh_log), [])
+
+    def test_discard_preserves_nonignored_protected_metadata(self):
+        self.put(self.remote, '.gitignore', '/out/\n')
+        for name in PROTECTED:
+            path = name if name == 'CLAUDE.local.md' else name + '/settings'
+            self.put(self.remote, path, 'protected metadata\n')
+        self.put(self.remote, 'notes.txt', 'discard me\n')
+        session = self.prepare()
+        self.assertFalse((self.remote / 'notes.txt').exists())
+        for name in PROTECTED:
+            path = name if name == 'CLAUDE.local.md' else name + '/settings'
+            self.assertEqual((self.remote / path).read_text(), 'protected metadata\n')
+        self.assertEqual(self.state(session)['discards'][0]['phase'], 'completed')
+
+    def test_partial_discard_failure_is_logged_and_blocks_apply(self):
+        self.put(self.remote, 'source.txt', 'tracked work\n')
+        self.put(self.remote, 'notes.txt', 'untracked work\n')
+        self.make_executable('git', f'''
+            import os
+            import sys
+            if sys.argv[1:3] == ['--literal-pathspecs', 'restore']:
+                sys.exit(19)
+            os.execv({TOOLS['git']!r}, ['git', *sys.argv[1:]])
+        ''')
+        session = self.prepare(succeeds=False, error='Command failed (19)')
+        self.assertFalse((self.remote / 'notes.txt').exists())
+        self.assertEqual((self.remote / 'source.txt').read_text(), 'tracked work\n')
+        remote_record = json.loads((Path(self.state(session)['remote_history']) / 'run.json').read_text())
+        self.assertEqual(remote_record['discards'][0]['phase'], 'failed')
+        self.assertIn('Discard result:', (session / 'logs/remote.log').read_text())
+        self.assert_run_blocked(session)
+
+    def test_discard_rejects_ignored_replacement_of_staged_deleted_file(self):
         self.git(self.remote, 'rm', '--cached', 'source.txt')
         self.put(self.remote, '.git/info/exclude', '/source.txt\n')
         self.put(self.remote, 'source.txt', 'irreplaceable ignored data\n')
@@ -764,7 +898,7 @@ class RemoteBuildIntegrationTests(unittest.TestCase):
         self.assertEqual(self.git(self.remote, 'status', '--porcelain=v1', '-z'), before)
         self.assertEqual(self.git(self.remote, 'stash', 'list'), '')
 
-    def test_stash_rejects_directory_replacement_with_ignored_child(self):
+    def test_discard_rejects_directory_replacement_with_ignored_child(self):
         (self.remote / 'source.txt').unlink()
         self.put(self.remote, 'source.txt/valuable.bin', 'irreplaceable child\n')
         self.put(self.remote, '.git/info/exclude', '/source.txt/\n')
@@ -772,7 +906,7 @@ class RemoteBuildIntegrationTests(unittest.TestCase):
         self.assertEqual((self.remote / 'source.txt/valuable.bin').read_text(), 'irreplaceable child\n')
         self.assertEqual(self.git(self.remote, 'stash', 'list'), '')
 
-    def test_stash_rejects_remote_hidden_index_changes(self):
+    def test_discard_rejects_remote_hidden_index_changes(self):
         for flag, undo in (('--assume-unchanged', '--no-assume-unchanged'),
                            ('--skip-worktree', '--no-skip-worktree')):
             with self.subTest(flag=flag):
@@ -803,7 +937,7 @@ class RemoteBuildIntegrationTests(unittest.TestCase):
         if visible_work:
             self.assertEqual((self.remote / 'mode.sh').read_text(), 'visible work\n')
 
-    def test_stat_cache_hidden_modification_blocks_stash(self):
+    def test_stat_cache_hidden_modification_blocks_discard(self):
         self.assert_hidden_content_is_protected(visible_work=True)
 
     def test_stat_cache_hidden_modification_blocks_apparently_clean_remote(self):

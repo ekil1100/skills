@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Fixed remote worker; also imported locally for identical safety checks."""
 from datetime import datetime, timezone
+import errno
 import hashlib
 import json
 import os
@@ -323,13 +324,18 @@ def fingerprint(root, names):
     return records
 
 
+def source_status(root):
+    return git(root, 'status', '--porcelain=v1', '-z', '--untracked-files=all',
+               '--', '.', *(':(top,exclude)' + name for name in sorted(PROTECTED)))
+
+
 def snapshot(root, names=None):
     validate_index(root)
     head = decode(git(root, 'rev-parse', 'HEAD')).strip()
     if names is None:
         names = paths(root, head)
     return {'head': head, 'paths': names, 'files': fingerprint(root, names),
-            'status': decode(git(root, 'status', '--porcelain=v1', '-z', '--untracked-files=all')),
+            'status': decode(source_status(root)),
             'index': hashlib.sha256(git(root, 'ls-files', '--stage', '-z')).hexdigest()}
 
 
@@ -340,9 +346,9 @@ def info(root):
 
 
 def check_hidden_changes(root):
-    # Git's stat/fsmonitor cache may call changed bytes clean. Stash only saves
-    # changes Git notices, so hash supposedly unchanged files before it can reset
-    # anything. hash-object applies the same clean/EOL filters as the index.
+    # Git's stat/fsmonitor cache may call changed bytes clean. Hash supposedly
+    # unchanged files before discarding changes. hash-object applies the same
+    # clean/EOL filters as the index.
     known = set(git(root, 'diff-files', '--name-only', '-z').split(b'\0'))
     regular = []
     for record in git(root, 'ls-files', '--stage', '-z').split(b'\0'):
@@ -379,11 +385,10 @@ def check_hidden_changes(root):
                 raise RuntimeError(f'Git did not report changed tracked content: {decode(name)!r}')
 
 
-def stash(root):
-    from datetime import datetime, timezone
+def discard(root):
     validate_index(root)
-    # Stash restores HEAD/index paths before any rsync preview. Protect ignored
-    # replacements here, including directories replacing formerly tracked files.
+    # Restore touches HEAD/index paths. Reject ignored replacements and unsafe
+    # file/directory transitions before any mutation, including protected paths.
     tree = git(root, 'ls-tree', '-r', '-z', 'HEAD')
     if any(r.startswith(b'160000 ') for r in tree.split(b'\0')):
         raise RuntimeError('Submodules are not supported.')
@@ -392,28 +397,48 @@ def stash(root):
     names = [decode(p) for p in sorted(set(tracked.split(b'\0')) - {b''})]
     check_ignored(root, names)
     check_hidden_changes(root)
+    expected = snapshot(root)
     before = info(root)
-    result = {'before': before, 'stash': None}
-    # Emit the original state before any mutation, including on failure.
-    print('Original remote state: ' + json.dumps(before), file=sys.stderr, flush=True)
-    if git(root, 'status', '--porcelain', '--untracked-files=all'):
-        message = 'ets-runtime-remote-build pre-build ' + datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
-        old = git(root, 'rev-parse', '--verify', 'refs/stash', allowed=(0, 128)).strip()
-        failure = None
-        try:
-            git(root, 'stash', 'push', '--include-untracked', '-m', message)
-        except RuntimeError as exc:
-            failure = exc
-        new = git(root, 'rev-parse', '--verify', 'refs/stash', allowed=(0, 128)).strip()
-        if new and new != old:
-            result['stash'] = {'id': decode(new), 'message': message}
-            print('Saved stash (not restored): ' + json.dumps(result), file=sys.stderr, flush=True)
-        if failure:
-            raise failure
-        if not result['stash']:
-            raise RuntimeError('Stash did not create a new commit.')
-    if git(root, 'status', '--porcelain', '--untracked-files=all'):
-        raise RuntimeError('Remote worktree is not clean after stash.')
+    untracked = [decode(p) for p in git(
+        root, 'ls-files', '--others', '--exclude-standard', '-z').split(b'\0')
+        if p and not protected(decode(p))]
+    restore = [name for name in names if not protected(name)]
+    result = {'before': before, 'phase': 'started',
+              'tracked': restore, 'untracked': untracked,
+              'changed': bool(before['status'])}
+    print('Discard remote changes: ' + json.dumps(result), file=sys.stderr, flush=True)
+    try:
+        if snapshot(root) != expected or info(root) != before:
+            raise RuntimeError('Remote changed before discard; prepare again.')
+        if result['changed']:
+            # Only listed non-ignored files are removed; never recurse into a
+            # directory or use clean -x/reset --hard, which can erase artifacts.
+            for name in untracked:
+                path = safe_path(root, name)
+                path.unlink()
+                parent = path.parent
+                while parent != root and not protected(parent.relative_to(root).as_posix()):
+                    try:
+                        parent.rmdir()
+                    except OSError as exc:
+                        if exc.errno not in (errno.ENOTEMPTY, errno.EEXIST):
+                            raise
+                        break
+                    parent = parent.parent
+            if restore:
+                git(root, '--literal-pathspecs', 'restore', '--source=HEAD',
+                    '--staged', '--worktree', '--pathspec-from-file=-',
+                    '--pathspec-file-nul',
+                    data=b''.join(os.fsencode(n) + b'\0' for n in restore))
+        if source_status(root):
+            raise RuntimeError('Remote worktree is not clean after discard.')
+        result['phase'] = 'completed'
+    except BaseException as exc:
+        result.update(phase='failed', error=str(exc))
+        exc.discard_record = result
+        raise
+    finally:
+        print('Discard result: ' + json.dumps(result), file=sys.stderr, flush=True)
     return result
 
 
@@ -479,8 +504,8 @@ def worker(request):
     if action == 'inspect':
         check_rsync()
         return {'info': info(root), 'dependencies': dependencies(root)}
-    if action == 'stash':
-        return stash(root)
+    if action == 'discard':
+        return discard(root)
     if action == 'align':
         validate_index(root)
         head = request['head']
@@ -495,8 +520,12 @@ def worker(request):
             git(root, 'fetch', '--no-tags', '--', urls[ref['url']], ref['branch'])
             git(root, 'cat-file', '-e', head + '^{commit}')
             git(root, 'merge-base', '--is-ancestor', head, 'FETCH_HEAD')
-            if git(root, 'status', '--porcelain', '--untracked-files=all'):
-                raise RuntimeError('Remote changed during alignment; prepare again to stash and recheck.')
+            if source_status(root):
+                raise RuntimeError('Remote changed during alignment; prepare again to discard and recheck.')
+            if git(root, 'diff-tree', '--no-commit-id', '--name-only', '-r',
+                   '--no-renames', '-z', 'HEAD', head, '--',
+                   *(':(top,literal)' + name for name in sorted(PROTECTED))):
+                raise RuntimeError('Target commit changes protected metadata; alignment stopped.')
             git(root, 'switch', '--no-overwrite-ignore', '--detach', head)
         if decode(git(root, 'rev-parse', 'HEAD')).strip() != head:
             raise RuntimeError('Remote commit alignment failed.')
@@ -594,14 +623,16 @@ def dispatch(request):
                 response['remote_history'] = str(directory)
             elif request['action'] == 'inspect':
                 state['environment'] = response
-            elif request['action'] == 'stash':
-                state.setdefault('stashes', []).append(response)
+            elif request['action'] == 'discard':
+                state.setdefault('discards', []).append(response)
             elif request['action'] == 'run':
                 state['commands'].append({'number': request['number'], **response})
             state['ended_at'] = timestamp()
             save_run(directory, state)
             return response
         except BaseException as exc:
+            if hasattr(exc, 'discard_record'):
+                state.setdefault('discards', []).append(exc.discard_record)
             state.update(phase='failed', error=str(exc), ended_at=timestamp())
             print('Remote operation failed: ' + str(exc), file=sys.stderr)
             save_run(directory, state)

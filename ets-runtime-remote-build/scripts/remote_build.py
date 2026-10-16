@@ -226,7 +226,7 @@ def prepare(args):
              'phase': 'preparing', 'root': str(root), 'relative': relative,
              'remote_relative': args.remote_relative if args.remote_relative is not None else relative,
              'host': socket.gethostname(), 'started_at': ops.timestamp(),
-             'source': baseline, 'stashes': [], 'commands': [], 'ark_sync': 'skipped'}
+             'source': baseline, 'discards': [], 'commands': [], 'ark_sync': 'skipped'}
     save(directory, state)
     try:
         local_root(root)
@@ -235,7 +235,7 @@ def prepare(args):
         with Remote(directory, state).locked() as remote:
             state['original'] = remote.request('inspect')
             save(directory, state)
-            state['stashes'].append(remote.request('stash'))
+            state['discards'].append(remote.request('discard'))
             save(directory, state)
             state['aligned'] = remote.request('align', head=state['local']['head'],
                                               refs=refs(root, state['local']['head']))
@@ -410,7 +410,9 @@ def archive_history():
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     subs = parser.add_subparsers(dest='action', required=True)
-    prep = subs.add_parser('prepare', help='Stash/align remote source and produce a reviewable preview')
+    prepare_help = ('Directly discard remote source changes (no stash), align the commit, '
+                    'and produce a reviewable preview')
+    prep = subs.add_parser('prepare', help=prepare_help, description=prepare_help)
     prep.add_argument('--repo', required=True)
     prep.add_argument('--remote-relative', help='Destination repository relative to remote HOME; validated on work')
     subs.add_parser('archive-history', help='Copy completed legacy cache sessions into verified persistent archives')
